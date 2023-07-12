@@ -1,7 +1,5 @@
 # HARP-I
-HARP-I is a novel methodology based on the same principles that the [Harmonic Phase analysis (HARP)](https://en.wikipedia.org/wiki/HARP_(algorithm)) method.
-
-HARP-I stands for Harmonic Phase Interpolation method and uses radial basis function interpolations to recover the tissue motion from tagged MR images.
+HARP-I stands for Harmonic Phase Interpolation method and uses radial basis function interpolations to recover the tissue motion from 2D and 3D tagged MR images.
 
 ## Installation
 
