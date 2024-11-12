@@ -15,7 +15,6 @@ function [c] = getHarmonicCenter(K, omega, window, FOV, center)
     % Indices for windowed K-space
     row0 = c(2)-window(2); row1 = c(2)+window(2);
     col0 = c(1)-window(1); col1 = c(1)+window(1);
-    [row0,row1,col0,col1] = checksizes(row0,row1,col0,col1,K);
     
     % Extract windowed K-space
     k = K(row0:row1,col0:col1);

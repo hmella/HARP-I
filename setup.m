@@ -23,11 +23,7 @@ function setup(varargin)
     path
 
     % strings & files to locate
-    strings = {'common_utilities', 'HARPI_utilities',...
-               'HARP_utilities', 'PCSPAMM_utilities',...
-               'RBF_utilities', 'Segmentation_utilities',...
-               'SinMod_utilities','Test','external_utilities',...
-               'HARP_SPHR','PhaseUnwrapping_utilities'};
+    strings = {'common', 'HARP-I','RBF'};
     files   = {};
 
     % locate files in search path, translate into strings
@@ -76,7 +72,7 @@ function setup(varargin)
 
     % utility directory
     basedir = fileparts(mfilename('fullpath'));
-    utildir = fullfile(basedir, 'utilities');
+    utildir = fullfile(basedir, 'src');
 
     % absolute folder path
     [stat,info] = fileattrib(utildir);
