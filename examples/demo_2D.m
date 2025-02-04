@@ -1,7 +1,7 @@
 clear; clc; close all;
 
 %% Load image
-load('data/data.mat')
+load('../data/data_2D.mat')
 
 % Image
 I = data.image;
@@ -22,8 +22,6 @@ direction = deg2rad([0 90]);
 filter = HARPFilter(struct('Image',I,'CentralFreq',ke,'Direction',direction,...
                            'FilterType','Transmission','Butterworth_cuttoff',17,...
                            'Butterworth_order',10));
-% filter = HARPFilter(struct('Image',I,'CentralFreq',ke,'Direction',direction,...
-%                            'FilterType','Transmission'));
 
 % Get harmonic image
 If = filter.filter(I);
@@ -52,9 +50,9 @@ args = struct(...
         'Frames',               1:Nfr,...
         'Show',                 false,...
         'Method',               'Multiquadric3',...
-        'RBFFactor',            [1 1]*150/(s/pxsz(1)),...
+        'a_constant',           [1 1]*150/(s/pxsz(1)),... % equation (16) and (17) on the paper.
         'RBFFacDist',           'Linear',...
-        'SpatialSmoothing',     15,...
+        'eta_constant',         15,... % equation (8) on the paper.
         'Connectivity',         4,...
         'RefPhaseSmoothing',    true,...
         'ROI',                  [86 132 68 114],...
@@ -66,7 +64,7 @@ dxr = squeeze(harpi.FittedMotion(:,:,1,:));
 dyr = squeeze(harpi.FittedMotion(:,:,2,:));
 fprintf('\n Elapsed time HARPI: %d (s)', t)
 
-% Strain
+%% Strain
 [X, Y] = meshgrid(1:size(dxr,2), 1:size(dxr,1));
 options = struct(...
     'X', X,...
@@ -83,43 +81,12 @@ CC = NaN([Isz(1) Isz(2) Nfr]);
 RR(repmat(st.maskimage,[1 1 Nfr])) = st.p1(:);
 CC(repmat(st.maskimage,[1 1 Nfr])) = st.p2(:);
 
-% Show estimated strain maps
-figure(2)
-tiledlayout(1,2,'Padding','compact','TileSpacing','compact')
-nexttile
-imagesc(CC(:,:,8),'AlphaData',st.maskimage); set(gca,'YDir','Normal');
-colormap(jet); axis off; colorbar; caxis([-0.5 0.2])
-title('CC')
-nexttile
-imagesc(RR(:,:,8),'AlphaData',st.maskimage); set(gca,'YDir','Normal'); axis off
-colormap(flipud(jet)); axis off; colorbar; caxis([-0.2 0.5])
-title('RR')
-
-
-%% Strain by segments
-% Number of segments
-Nseg = 6;
-
-% HARPI
-api = struct(...
-    'CC',               CC,...
-    'RR',               RR,...
-    'Mask',             st.maskimage,...
-    'Nseg',             Nseg,...
-    'ClockWise',        false,...
-    'Frames',           1:Nfr);
-harpi_seg = getStrainBySegments(api);
-
-% Plot strain by segments
-figure,
-errorbar(1:Nfr,mean(harpi_seg.segments_CC),...
-         std(harpi_seg.segments_CC),'-','LineWidth',2); hold on
-errorbar(1:Nfr,mean(harpi_seg.segments_RR),...
-         std(harpi_seg.segments_RR),'-','LineWidth',2); hold on
+%% Save motion and strain estimation
+save('motion2D_HARPI.mat','harpi','st')
 
 %% Show results
-% Plot results
-close all;
+% gif path
+gifFileName = 'StrainMap.gif';
 
 % displacements
 ui = permute(cat(4,dxr,dyr),[1 2 4 3]);
@@ -166,5 +133,16 @@ for i=1:size(ui,4)
     colormap(ax2,cc)
     axis([50 120 50 120])
     daspect([1 1 1])
-    pause(0.1)
+
+    frame = getframe(gcf);
+    img = frame2im(frame); 
+    [A, map] = rgb2ind(img, 256);
+
+    if i == 1
+        imwrite(A, map, gifFileName, 'gif', 'LoopCount', Inf, 'DelayTime', 0.1);
+    else
+        imwrite(A, map, gifFileName, 'gif', 'WriteMode', 'append', 'DelayTime', 0.1);
+    end
+
+    pause(0.1);
 end
