@@ -1,15 +1,67 @@
+% Copyright (c) 2016 DENSEanalysis Contributors
+%
+% PIXELSTRAIN3D Calculate 3D strain tensors based on displacement fields.
+%
+% Description:
+%   This function computes strain tensors (e.g., radial, circumferential, and
+%   principal strains) at each voxel location within a 3D segmented volume mask. 
+%   It extends the functionality of the original `pixelstrain` implementation 
+%   to three dimensions by introducing an additional spatial dimension (Z).
+%
+%   The function calculates strain values by determining the deformation
+%   gradient tensor at each voxel, applying coordinate system rotations,
+%   and computing principal strains and orientations.
+%
+% Inputs:
+%   'X'                - [3D matrix] Grid of X-coordinates.
+%   'Y'                - [3D matrix] Grid of Y-coordinates.
+%   'Z'                - [3D matrix] Grid of Z-coordinates.
+%   'mask'             - [3D matrix] Logical mask indicating regions of interest.
+%   'times'            - [vector] Time points for displacement measurements.
+%   'dx'               - [4D matrix] Precomputed X-displacements over time.
+%   'dy'               - [4D matrix] Precomputed Y-displacements over time.
+%   'dz'               - [4D matrix] Precomputed Z-displacements over time.
+%   'Origin'           - [vector] Origin for strain orientation calculations.
+%                         Default: mean(X(mask)), mean(Y(mask)), mean(Z(mask)).
+%   'Orientation'      - [3D matrix] Voxel-level orientation angles (radians).
+%                         Default: calculated based on `Origin`.
+%
+% Outputs:
+%   strain             - [struct] Structure containing the following fields:
+%                         - maskimage: Processed mask for visualization.
+%                         - Other strain components can be extended similarly.
+%
+%
+% Autor:
+%   DENSEanalysis: - Andrew Gilliam <http://www.adgilliam.com>
+%                  - Andrew Scott <https://github.com/andydscott>
+%                  - David vanMaanen <https://github.com/dpvanmaan>
+%                  - Jonathan Suever <https://suever.com>
+%
+%   Copyright (c) 2016 DENSEanalysis Contributors
+%
+% Collaborator:
+%   Benjamin Lopez (benjamin.lopezf@usm.cl)
+%
+%
+% Differences from `pixelstrain`:
+%   1. Includes an additional Z-dimension for inputs (`Z`, `dz`) and computations.
+%   2. Neighbor calculations and mask validations are extended to 3D.
+%   3. Orientation and strain computations consider voxel-level 3D coordinates.
+%
+% Licensing:
+%   This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+%   If a copy of the MPL was not distributed with this file, You can obtain one at
+%   http://mozilla.org/MPL/2.0/.
+%
+% Notes:
+%   - This implementation is a 3D extension of the 2D `pixelstrain` function.
+%   - The added Z-dimension allows for the analysis of volumetric datasets.
+%   - The function requires displacement fields (`dx`, `dy`, `dz`) to be 
+%     precomputed and supplied as inputs.
+
 function strain = pixelstrain3D(varargin)
 
-    %PATCHSTRAIN
-    %
-    %
-    %
-    
-    % This Source Code Form is subject to the terms of the Mozilla Public
-    % License, v. 2.0. If a copy of the MPL was not distributed with this
-    % file, You can obtain one at http://mozilla.org/MPL/2.0/.
-    %
-    % Copyright (c) 2016 DENSEanalysis Contributors
     
     %% PARSE APPLICATION DATA
 
@@ -93,53 +145,56 @@ function strain = pixelstrain3D(varargin)
 
     % eliminate any invalid mask locations
     h = [0 1 0; 1 0 0; 0 0 0];
-    tmp = false([Isz,4]);
+    tmp_SA = false([Isz,4]);
+    tmp_LA = false([Isz,4]);    
     for i=1:Isz(3)
         for k = 1:4
-            tmp(:,:,i,k) = conv2(double(mask(:,:,i)),h,'same')==2;
+            tmp_SA(:,:,i,k) = conv2(double(mask(:,:,i)),h,'same')==2;
             h = rot90(h);
         end
     end
-
-    mask = any(tmp,4) & mask;
-
+    for i=1:Isz(2)
+        for k = 1:4
+            tmp_LA(:,i,:,k) = conv2(squeeze(double(mask(:,i,:))),h,'same')==2;
+            h = rot90(h);
+        end
+    end
+    mask = any(tmp_SA,4) & any(tmp_LA,4) & mask;
+    clear tmp_SA tmp_LA
+    
 
     %% STRAIN CALCULATION
 
     % determine number of neighbors
     h = [0 1 0; 1 0 1; 0 1 0];
-    Nneighbor = zeros(Isz);
+    Nneighbor_SA = zeros(Isz);
     for i=1:Isz(3)
-        Nneighbor(:,:,i) = mask(:,:,i).*conv2(double(mask(:,:,i)),h,'same');
+        Nneighbor_SA(:,:,i) = mask(:,:,i).*conv2(double(mask(:,:,i)),h,'same');
     end
+    Nneighbor_LA = zeros(Isz);
+    for i=1:Isz(2)
+        Nneighbor_LA(:,i,:) = squeeze(mask(:,i,:)).*conv2(squeeze(double(mask(:,i,:))),h,'same');
+    end    
 
     % initialize output strain structure
     tmp = NaN([Isz Ntime]);
-%     strain = struct(...
-%         'vertices',     [],...
-%         'faces',        [],...
-%         'orientation',  [],...
-%         'maskimage',    [],...
-%         'XX',       tmp,...
-%         'YY',       tmp,...
-%         'XY',       tmp,...
-%         'YX',       tmp,...
-%         'RR',       tmp,...
-%         'CC',       tmp,...
-%         'RC',       tmp,...
-%         'CR',       tmp,...
-%         'p1',       tmp,...
-%         'p2',       tmp,...
-%         'p1or',     tmp);
+
     strain = struct(...
         'maskimage',    [],...
         'RR',       tmp,...
-        'CC',       tmp);
-
+        'RC',       tmp,...
+        'RL',       tmp,...
+        'CR',       tmp,...
+        'CC',       tmp,...
+        'CL',       tmp,...
+        'LR',       tmp,...
+        'LC',       tmp,...
+        'LL',       tmp);
+    
     % strain calculation at each point
-    dx = zeros(2,4);
-    dX = zeros(2,4);
-    tf = false(1,4);
+    dx = zeros(3,6);
+    dX = zeros(3,6);
+    tf = false(3,6);
 
     for fr = 1:Ntime
         fprintf('\n Estimating strain on frame %d',fr)
@@ -147,82 +202,98 @@ function strain = pixelstrain3D(varargin)
             for j = 1:Isz(2)
                 for i = 1:Isz(1)
 
-                    if mask(i,j,k) && Nneighbor(i,j,k) > 1
+                    if mask(i,j,k)
 
                         dx(:) = 0;
                         dX(:) = 0;
                         tf(:) = false;
 
-                        if (i-1 >= 1) && mask(i-1,j,k)
+                        % X direction
+                        if (i-1 >= 1) && mask(i-1,j,k) && Nneighbor_SA(i,j,k) > 1
                             tf(1) = true;
                             dx(:,1) = [xtrj(i-1,j,k,fr) - xtrj(i,j,k,fr);...
-                                    ytrj(i-1,j,k,fr) - ytrj(i,j,k,fr)];
+                                       ytrj(i-1,j,k,fr) - ytrj(i,j,k,fr);...
+                                       ztrj(i-1,j,k,fr) - ztrj(i,j,k,fr)];
                             dX(:,1) = [X(i-1,j,k) - X(i,j,k); ...
-                                    Y(i-1,j,k) - Y(i,j,k)];
+                                       Y(i-1,j,k) - Y(i,j,k); ...
+                                       1e-10];
                         end
 
-                        if (i+1 <= Isz(1)) && mask(i+1,j,k)
+                        if (i+1 <= Isz(1)) && mask(i+1,j,k) && Nneighbor_SA(i,j,k) > 1
                             tf(2) = true;
                             dx(:,2) = [xtrj(i+1,j,k,fr) - xtrj(i,j,k,fr);...
-                                    ytrj(i+1,j,k,fr) - ytrj(i,j,k,fr)];
+                                       ytrj(i+1,j,k,fr) - ytrj(i,j,k,fr);...
+                                       ztrj(i+1,j,k,fr) - ztrj(i,j,k,fr)];
                             dX(:,2) = [X(i+1,j,k) - X(i,j,k); ...
-                                    Y(i+1,j,k) - Y(i,j,k)];
+                                       Y(i+1,j,k) - Y(i,j,k); ...
+                                       1e-10];
                         end
 
-                        if (j-1 >= 1) && mask(i,j-1,k)
+                        % Y direction
+                        if (j-1 >= 1) && mask(i,j-1,k) && Nneighbor_SA(i,j,k) > 1
                             tf(3) = true;
                             dx(:,3) = [xtrj(i,j-1,k,fr) - xtrj(i,j,k,fr);...
-                                    ytrj(i,j-1,k,fr) - ytrj(i,j,k,fr)];
-                            dX(:,3) = [X(i,j-1,k) - X(i,j,k); ...
-                                    Y(i,j-1,k) - Y(i,j,k)];
+                                       ytrj(i,j-1,k,fr) - ytrj(i,j,k,fr);...
+                                       ztrj(i,j-1,k,fr) - ztrj(i,j,k,fr)];
+                            dX(:,3) = [X(i,j-1,k) - X(i,j,k);...
+                                       Y(i,j-1,k) - Y(i,j,k);...
+                                       1e-10];
                         end
 
-                        if (j+1 <= Isz(2)) && mask(i,j+1,k)
+                        if (j+1 <= Isz(2)) && mask(i,j+1,k) && Nneighbor_SA(i,j,k) > 1
                             tf(4) = true;
                             dx(:,4) = [xtrj(i,j+1,k,fr) - xtrj(i,j,k,fr);...
-                                    ytrj(i,j+1,k,fr) - ytrj(i,j,k,fr)];
-                            dX(:,4) = [X(i,j+1,k) - X(i,j,k); ...
-                                    Y(i,j+1,k) - Y(i,j,k)];
+                                       ytrj(i,j+1,k,fr) - ytrj(i,j,k,fr);...
+                                       ztrj(i,j+1,k,fr) - ztrj(i,j,k,fr)];
+                            dX(:,4) = [X(i,j+1,k) - X(i,j,k);...
+                                       Y(i,j+1,k) - Y(i,j,k);...
+                                       1e-10];
                         end
 
+                        % Z direction
+                        if (k-1 >= 1) && mask(i,j,k-1) && Nneighbor_LA(i,j,k) > 1
+                            tf(5) = true;
+                            dx(:,5) = [xtrj(i,j,k-1,fr) - xtrj(i,j,k,fr);...
+                                       ytrj(i,j,k-1,fr) - ytrj(i,j,k,fr);...
+                                       ztrj(i,j,k-1,fr) - ztrj(i,j,k,fr)];
+                            dX(:,5) = [1e-10;...
+                                       1e-10;...
+                                       Z(i,j,k-1) - Z(i,j,k)];
+                        end
+
+                        if (k+1 <= Isz(3)) && mask(i,j,k+1) && Nneighbor_LA(i,j,k) > 1
+                            tf(6) = true;
+                            dx(:,6) = [xtrj(i,j,k+1,fr) - xtrj(i,j,k,fr);...
+                                       ytrj(i,j,k+1,fr) - ytrj(i,j,k,fr);...
+                                       ztrj(i,j,k+1,fr) - ztrj(i,j,k,fr)];
+                            dX(:,6) = [1e-10;...
+                                       1e-10;...
+                                       Z(i,j,k+1) - Z(i,j,k)];
+                        end
+                        
 
                         % average deformation gradient tensor
                         Fave = dx(:,tf)/dX(:,tf);
 
                         % x/y strain tensor
-                        E = 0.5*(Fave'*Fave - eye(2));
+                        E = 0.5*(Fave'*Fave - eye(3));
 
                         % coordinate system rotation matrix
                         % (Note this is the transpose of the vector rotation matrix)
-                        Rot = [ct(i,j) st(i,j); -st(i,j) ct(i,j)];
+                        Rot = [ct(i,j) st(i,j) 0; -st(i,j) ct(i,j) 0; 0 0 1];
 
                         % radial/circumferential strain tensor
                         Erot = Rot*E*Rot';
 
-                        % principal strains
-                        [v,d] = eig(E,'nobalance');
-
-                        % record output
-%                         strain.XX(i,j,k,fr) = E(1);
-%                         strain.XY(i,j,k,fr) = E(2);
-%                         strain.YX(i,j,k,fr) = E(3);
-%                         strain.YY(i,j,k,fr) = E(4);
-
-                        strain.RR(i,j,k,fr) = Erot(1);
-%                         strain.RC(i,j,k,fr) = Erot(2);
-%                         strain.CR(i,j,k,fr) = Erot(3);
-                        strain.CC(i,j,k,fr) = Erot(4);
-
-%                         if all(d == 0)
-%                             strain.p1(i,j,k,fr) = 0;
-%                             strain.p2(i,j,k,fr) = 0;
-%                         else
-%                             strain.p1(i,j,k,fr)   = d(end);
-%                             strain.p2(i,j,k,k,fr)   = d(1);
-%                             strain.p1or(i,j,k,fr) = atan2(v(2,2),v(1,2));
-                            % strain.p2or(i,j,fr) = atan2(v(2,1),v(1,1));
-%                         end
-
+                        strain.RR(i,j,k,fr) = Erot(1); % 11
+                        strain.RC(i,j,k,fr) = Erot(2); % 12
+                        strain.RL(i,j,k,fr) = Erot(3); % 13
+                        strain.CR(i,j,k,fr) = Erot(4); % 21
+                        strain.CC(i,j,k,fr) = Erot(5); % 22
+                        strain.CL(i,j,k,fr) = Erot(6); % 23
+                        strain.LR(i,j,k,fr) = Erot(7); % 31
+                        strain.LC(i,j,k,fr) = Erot(8); % 32
+                        strain.LL(i,j,k,fr) = Erot(9); % 33
                     end
 
                 end
@@ -235,34 +306,9 @@ function strain = pixelstrain3D(varargin)
 
     %% FACE/VERTEX OUTPUT
 
-    % x/y from X/Y
-%     x = X(1,:,1);
-%     y = Y(:,1,1)';
-    
-    % determine pixel vertices
-%     dx = mean(diff(x));
-%     dy = mean(diff(y));
-    
-%     xv = [x(1)-dx/2, x(1:end)+dx/2];
-%     yv = [y(1)-dx/2, y(1:end)+dy/2];
-    
-%     [Xv,Yv] = meshgrid(xv,yv);
-
-%     % face/vertex structure
-%     fv = surf2patch(Xv,Yv,Zv,zeros(size(Xv)));
-%     fv.vertices = fv.vertices(:,1:3);
-
     % unique faces within mask
-    tf = mask & Nneighbor>1;
+    tf = mask & Nneighbor_SA>1 & Nneighbor_LA>1;
     strain.maskimage = tf;
-
-%     fv.faces = fv.faces(tf,:);
-%     [idx,~,map] = unique(fv.faces(:));
-
-%     fv.vertices = fv.vertices(idx,:);
-%     fv.faces    = reshape(map,size(fv.faces));
-
-    % eliminate all unnecessary strain values
     idx0 = find(tf);
     idx  = idx0(:,:,:,ones(Ntime,1));
     for fr = 1:Ntime
@@ -276,12 +322,5 @@ function strain = pixelstrain3D(varargin)
         strain.(tag) = reshape(strain.(tag)(idx),[numel(idx0),Ntime]);
     end
 
-%     strain.vertices    = fv.vertices;
-%     strain.faces       = fv.faces;
-%     strain.orientation = theta(tf);
-
 end
-    
-    
-%% END OF FILE=============================================================
     

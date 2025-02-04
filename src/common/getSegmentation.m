@@ -1,29 +1,61 @@
+% Copyright (c) 2025 Hernan Mella
+%
+% GETSEGMENTATION - GUI for interactive segmentation of image frames.
+%
+% Syntax:
+%   getSegmentation(varargin)
+%
+% Description:
+%   This GUI enables users to perform interactive segmentation by creating,
+%   modifying, and exporting masks and contours across multiple image frames.
+%   It is designed for applications such as medical image analysis.
+%
+% Features:
+%   - View and navigate through image frames.
+%   - Add, edit, or duplicate contour lines interactively.
+%   - Generate masks from contour-based segmentation.
+%   - Save segmentation results as .mat files.
+%
+% Inputs:
+%   varargin - A structure containing:
+%     - Image (3D array): Image data to be segmented.
+%     - Phase (4D array): Phase data for visualization.
+%     - Contours (optional): Initial contours for segmentation.
+%     - Axis (optional): Initial axis limits for visualization.
+%
+% Outputs:
+%   varargout - Segmentation results, including:
+%     - mask: Binary masks for each frame.
+%     - contours: Contours defining the segmented regions.
+%
+% Examples:
+%   % Define inputs
+%   inputs.Image = rand(256, 256, 10); % Simulated image data
+%   inputs.Phase = rand(256, 256, 2, 10); % Simulated phase data
+%
+%   % Launch GUI
+%   getSegmentation(inputs);
+%
+% Author:
+%   Hernan Mella (hernan.mella@pucv.cl)
+%
+% Collaborator:
+%   Benjamin Lopez (benjamin.lopezf@usm.cl)
+%
+% License:
+%   This Source Code Form is subject to the terms of the Mozilla Public 
+%   License, v. 2.0. If a copy of the MPL was not distributed with this 
+%   file, You can obtain one at http://mozilla.org/MPL/2.0/.
+%
+% Notes:
+%   - This implementation aligns with methods described in:
+%     Mella et al., "HARP-I: A Harmonic Phase Interpolation Method for the 
+%     Estimation of Motion From Tagged MR Images," IEEE Transactions on 
+%     Medical Imaging, vol. 40, no. 4, pp. 1240-1251, April 2021.
+%   - Reference: DOI 10.1109/TMI.2021.3051092
+%
+
 function varargout = getSegmentation(varargin)
-% getSegmentation MATLAB code for getSegmentation.fig
-%      getSegmentation, by itself, creates a new getSegmentation or raises the existing
-%      singleton*.
-%
-%      H = getSegmentation returns the handle to a new getSegmentation or the handle to
-%      the existing singleton*.
-%
-%      getSegmentation('CALLBACK',hObject,eventData,handles,...) calls the local
-%      function named CALLBACK in getSegmentation.M with the given input arguments.
-%
-%      getSegmentation('Property','Value',...) creates a new getSegmentation or raises the
-%      existing singleton*.  Starting from the left, property value pairs are
-%      applied to the GUI before getSegmentation_OpeningFcn gets called.  An
-%      unrecognized property name or invalid value makes property application
-%      stop.  All inputs are passed to getSegmentation_OpeningFcn via varargin.
-%
-%      *See GUI Options on GUIDE's Tools meinu.  Choose "GUI allows only one
-%      instance to run (singleton)".
-%
-% See also: GUIDE, GUIDATA, GUIHANDLES
-
-% Edit the above text to modify the response to help getSegmentation
-
-% Last Modified by GUIDE v2.5 26-Jul-2020 21:47:16
-
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
 gui_State = struct('gui_Name',       mfilename, ...
@@ -44,15 +76,11 @@ end
 % End initialization code - DO NOT EDIT
 
 
-% --- Executes just before getSegmentation is made visible.
-function getSegmentation_OpeningFcn(hObject, eventdata, handles, varargin)
-% This function has no output args, see OutputFcn.
-% hObject    handle to figure
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-% varargin   command line arguments to getSegmentation (see VARARGIN)
 
-  %% Create the data to plot.
+function getSegmentation_OpeningFcn(hObject, eventdata, handles, varargin)
+
+
+  %Create the data to plot.
   % Mask, phase and contours
   handles.I = varargin{1}.Image;
   handles.Pha = varargin{1}.Phase;
@@ -119,7 +147,6 @@ function getSegmentation_OpeningFcn(hObject, eventdata, handles, varargin)
   set(handles.axes1,'YDir','Normal');
   set(handles.axes1,'visible','off');
   axis(handles.axes1,handles.axis)
-%   set(gcf,'toolbar','figure');  
   
   % Store image handle for masks creation
   handles.image_handle = h;
@@ -158,29 +185,16 @@ function getSegmentation_OpeningFcn(hObject, eventdata, handles, varargin)
 
   % Update handles structure
   guidata(hObject, handles);
-
-  % UIWAIT makes getSegmentation wait for user response (see UIRESUME)
-%   uiwait(handles.figure1);
   uiwait();
 
 
-% --- Outputs from this function are returned to the command line.
-function varargout = getSegmentation_OutputFcn(hObject, eventdata, handles) 
-% varargout  cell array for returning output args (see VARARGOUT);
-% hObject    handle to figure
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
 
-% Get default command line output from handles structure
+function varargout = getSegmentation_OutputFcn(hObject, eventdata, handles) 
 varargout{1} = handles.output;
 delete(hObject);
 
 
-% --- Executes when user attempts to close figure1.
 function figure1_CloseRequestFcn(hObject, eventdata, handles)
-% hObject    handle to figure1 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
 
 % Outputs for save dialog
 mask = handles.mask;
@@ -194,19 +208,13 @@ catch
   fprintf('\n The segmentation was not saved!\n')
 end
 
-% Hint: delete(hObject) closes the ficlosegure
-% delete(hObject);
+
 handles.output = handles;
 guidata(hObject, handles);  % Store the outputs in the GUI
 uiresume()                  % resume UI which will trigger the OutputFcn
 
 
-% --- Executes on button press in Unwrap phase
 function unwrap_phase_Callback(hObject, eventdata, handles)
-% hObject    handle to pushbutton1 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
 % Unwrap phases
 XPha = unwrap2(handles.Pha(:,:,1,handles.frame),'Mask',handles.mask(:,:,handles.frame),'Connectivity',4,'Seed','auto');
 YPha = unwrap2(handles.Pha(:,:,2,handles.frame),'Mask',handles.mask(:,:,handles.frame),'Connectivity',4,'Seed','auto');
@@ -225,13 +233,9 @@ set(handles.axes3,'visible','off');
 axis(handles.axes3,handles.axis)
 
 
-% --- Executes on button press in pushbutton3.
-function preview_mask_Callback(hObject, eventdata, handles)
-% hObject    handle to pushbutton3 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
 
-% Generate mask from current graph-cuts
+function preview_mask_Callback(hObject, eventdata, handles)
+
 args = struct(...
     'MaskSize',     handles.Isz,...
     'Contours',     handles.contours{handles.frame},...
@@ -253,11 +257,9 @@ axis(handles.axes3,handles.axis)
 guidata(hObject,handles)
 
 
-% --- Executes on button press in pushbutton10.
+
 function generate_masks_Callback(hObject, eventdata, handles)
-% hObject    handle to pushbutton10 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
+
 
 % Generate mask from current graph-cuts
 for frame=1:handles.Nfr
@@ -274,15 +276,7 @@ fprintf('\nMasks generated succesfully!\n')
 % Update figure and handles
 guidata(hObject,handles)
 
-
-% --- Executes on button press in pushbutton4.
 function next_frame_Callback(hObject, eventdata, handles)
-% hObject    handle to pushbutton4 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Before updating the frame, the getSegmentation positions are stored and
-% getSegmentation are resetted
 
 % Store contours positions in the previous frame
 if ~isempty(handles.contours{handles.frame})
@@ -321,8 +315,6 @@ set(handles.axes3,'YDir','Normal')
 set(handles.axes3,'visible','off');
 axis(handles.axes3,handles.axis)  
 
-% Check for previously stored contours. If there are not previous 
-% contours the user can draw new ones
 if ~isempty(handles.contours_positions{handles.frame})
     % Get contours
     handles.contours{handles.frame} = cline(handles.contours_positions{handles.frame});
@@ -373,14 +365,7 @@ end
 % Update handles object
 guidata(hObject, handles);
 
-
-% --- Executes on button press in pushbutton5.
 function previous_frame_Callback(hObject, eventdata, handles)
-% hObject    handle to pushbutton5 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Store contours positions in the previouse frame
 if ~isempty(handles.contours{handles.frame})
     fprintf('\n    Updating contours positions for frame %.0d',handles.frame)
     for i=1:handles.contours_number
@@ -471,7 +456,6 @@ end
 guidata(hObject, handles);
 
 
-% --- Executes on button press in pushbutton6.
 function add_contours_Callback(hObject, eventdata, handles)
 % hObject    handle to pushbutton6 (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -506,23 +490,10 @@ guidata(hObject, handles);
 uiwait()
 
 
-function x_min = edit2_Callback(hObject, eventdata, handles)
-% hObject    handle to edit2 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of edit2 as text
-%        str2double(get(hObject,'String')) returns contents of edit2 as a double  
+function x_min = edit2_Callback(hObject, eventdata, handles) 
 x_min = str2double(get(handles.edit2,'String'));
 
-% --- Executes during object creation, after setting all properties.
 function edit2_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to edit2 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
 end
@@ -530,21 +501,9 @@ end
 
 
 function x_max = edit3_Callback(hObject, eventdata, handles)
-% hObject    handle to edit3 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of edit3 as text
-%        str2double(get(hObject,'String')) returns contents of edit3 as a double
 x_max = str2double(get(handles.edit3,'String'));
   
-% --- Executes during object creation, after setting all properties.
 function edit3_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to edit3 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
 %       See ISPC and COMPUTER.
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
@@ -552,22 +511,10 @@ end
 
 
 function y_min = edit4_Callback(hObject, eventdata, handles)
-% hObject    handle to edit4 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of edit4 as text
-%        str2double(get(hObject,'String')) returns contents of edit4 as a double
 
 y_min = str2double(get(handles.edit4,'String'));
 
-% --- Executes during object creation, after setting all properties.
 function edit4_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to edit4 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
 %       See ISPC and COMPUTER.
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
@@ -575,32 +522,16 @@ end
 
 
 function y_max = edit5_Callback(hObject, eventdata, handles)
-% hObject    handle to edit5 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of edit5 as text
-%        str2double(get(hObject,'String')) returns contents of edit5 as a double
 y_max = str2double(get(handles.edit5,'String'));
 
-% --- Executes during object creation, after setting all properties.
-function edit5_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to edit5 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
 
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
+function edit5_CreateFcn(hObject, eventdata, handles)
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
 end
 
 
-% --- Executes on button press in pushbutton7.
 function update_axis_Callback(hObject, eventdata, handles)
-% hObject    handle to pushbutton7 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
 
 % Update axis
 x_min = edit2_Callback(hObject, eventdata, handles);
@@ -618,56 +549,31 @@ guidata(hObject, handles);
 
 
 function c_min = edit6_Callback(hObject, eventdata, handles)
-% hObject    handle to edit6 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of edit6 as text
-%        str2double(get(hObject,'String')) returns contents of edit6 as a double
 c_min = str2double(get(handles.edit6,'String'));
 
 
-% --- Executes during object creation, after setting all properties.
 function edit6_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to edit6 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
 end
 
 
 function c_max = edit7_Callback(hObject, eventdata, handles)
-% hObject    handle to edit7 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of edit7 as text
-%        str2double(get(hObject,'String')) returns contents of edit7 as a double
 c_max = str2double(get(handles.edit7,'String'));
 
 
-% --- Executes during object creation, after setting all properties.
-function edit7_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to edit7 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
 
-% Hint: edit controls usually have a white background on Windows.
+function edit7_CreateFcn(hObject, eventdata, handles)
+
 %       See ISPC and COMPUTER.
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
 end
 
 
-% --- Executes on button press in pushbutton9.
+
 function update_caxis_Callback(hObject, eventdata, handles)
-% hObject    handle to pushbutton9 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
+
 % Update axis
 c_min = edit6_Callback(hObject, eventdata, handles);
 c_max = edit7_Callback(hObject, eventdata, handles); 
@@ -680,11 +586,7 @@ caxis(handles.axes1,handles.caxis);
 guidata(hObject, handles);
 
 
-% --- Executes on button press in pushbutton11.
 function duplicate_contours_Callback(hObject, eventdata, handles)
-% hObject    handle to pushbutton11 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
 
 % Get frame from which contours will be duplicated
 c_frame = edit8_Callback(hObject, eventdata, handles);
@@ -720,22 +622,11 @@ guidata(hObject, handles);
 
 
 function c = edit8_Callback(hObject, eventdata, handles)
-% hObject    handle to edit8 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
 
-% Hints: get(hObject,'String') returns contents of edit8 as text
-%        str2double(get(hObject,'String')) returns contents of edit8 as a double
 c = str2double(get(handles.edit8,'String'));
 
 
-% --- Executes during object creation, after setting all properties.
 function edit8_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to edit8 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
 %       See ISPC and COMPUTER.
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');

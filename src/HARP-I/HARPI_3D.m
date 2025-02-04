@@ -1,6 +1,81 @@
-function [metadata] = HARPI_3D(Ih,varargin)
+% Copyright (c) 2025 Hernan Mella
+%
+% HARPI_3D - Harmonic Phase Interpolation for 3D Data
+%
+% Description:
+%   This function performs harmonic phase interpolation on 3D image sequences, 
+%   enabling phase unwrapping, displacement estimation, and optional temporal 
+%   fitting. It is designed for motion estimation in 3D tagged MR images.
+%
+% Syntax:
+%   metadata = HARPI_3D(Ih, 'ParameterName', ParameterValue, ...)
+%
+% Inputs:
+%   Ih          - Input image sequence (5D array, size: [rows, cols, slices, channels, frames]).
+%   varargin    - Optional parameters specified as name-value pairs:
+%       'Mask'              - Binary mask (default: true(size(Ih))).
+%       'FOV'               - Field of view (default: []).
+%       'PixelSize'         - Pixel size (default: []).
+%       'Frames'            - Frames to be analyzed (default: all frames).
+%       'Show'              - Flag to display intermediate results (default: false).
+%       'Method'            - Interpolation method (default: 'ThinPlate').
+%       'a_constant'         - Radial basis function factor (default: []). Equation (16) and (17) on the paper.
+%       'RBFFacDist'        - Distribution of RBF factors ('quadratic', default).
+%       'eta_constant'  - Spatial smoothing factor (default: 1e-08). Equation (8) on the paper.
+%       'Seed'              - Unwrapping seed (default: 'auto').
+%       'Connectivity'      - Connectivity for unwrapping (default: 4).
+%       'RefPhaseSmoothing' - Flag for reference phase smoothing (default: false).
+%       'ROI'               - Region of interest (default: [1, rows, 1, cols, 1, slices]).
+%       'TemporalFitting'   - Flag for temporal fitting (default: false).
+%       'TemporalFittingOrder' - Temporal fitting order (default: 10).
+%       'DownsamplingFac'   - Downsampling factor (default: 2).
+%
+% Outputs:
+%   metadata - Struct containing:
+%       RawMotion           - Raw displacement field.
+%       FittedMotion        - Temporally fitted displacement field (if implemented).
+%       RawTrajectories     - Raw tissue trajectories.
+%       FittedTrajectories  - Temporally fitted tissue trajectories (if implemented).
+%       UnwrappedPhases     - Unwrapped harmonic phase images (empty in 3D implementation).
+%
+% Example:
+%   % Load 3D image sequence and mask
+%   Ih = rand(128, 128, 64, 3, 10);  % Example 5D image sequence
+%   mask = true(size(Ih, 1), size(Ih, 2), size(Ih, 3));
+%
+%   % Perform harmonic phase interpolation
+%   metadata = HARPI_3D(Ih, 'Mask', mask, 'Frames', 1:10, 'Show', true);
+%
+%   % Access raw trajectories
+%   raw_trajectories = metadata.RawTrajectories;
+%
+% Author:
+%   Hernan Mella (hernan.mella@pucv.cl)
+%
+% Collaborator:
+%   Benjamin Lopex (Benjamin.lopezf@usm.cl)
+%
+% License:
+%   This Source Code Form is subject to the terms of the Mozilla Public License, 
+%   version 2.0. If a copy of the MPL was not distributed with this file, 
+%   you can obtain one at http://mozilla.org/MPL/2.0/.
+%
+% Notes:
+%   - This function extends the capabilities of HARPI to 3D datasets and is a 
+%     **core algorithm** for motion estimation in 3D tagged MR images.
+%   - Implements the techniques described in:
+%     Mella et al., "HARP-I: A Harmonic Phase Interpolation Method for the 
+%     Estimation of Motion From Tagged MR Images," IEEE Transactions on Medical 
+%     Imaging, vol. 40, no. 4, pp. 1240-1251, April 2021.
+%   - Reference: DOI 10.1109/TMI.2021.3051092
+%   - Note: Temporal fitting is currently a placeholder in this implementation 
+%     and has not been fully developed for 3D data.
+%
+%
+%   See also: parseinputs, Downsample, unwrap2, TemporalPhaseConsistency, RefPhaseSmoothing, RBFInterp2D, TemporalFitting
 
-    %HARPI Summary of this function goes here
+function [metadata] = HARPI_3D(Ih,varargin)
+     %HARPI Summary of this function goes here
     %   Detailed explanation goes here
     
     %% PARSE INPUT
@@ -12,9 +87,9 @@ function [metadata] = HARPI_3D(Ih,varargin)
             'Frames',            [],...
             'Show',              false,...
             'Method',            'ThinPlate',...
-            'RBFFactor',         [],...
+            'a_constant',         [],... % Equation (16) and (17) on the paper.
             'RBFFacDist',        'quadratic',...
-            'SpatialSmoothing',  1e-08,...
+            'eta_constant',  1e-08,... % Equation (8) on the paper.
             'Seed',              'auto',...
             'Connectivity',      4,...
             'RefPhaseSmoothing', false,...
@@ -28,11 +103,11 @@ function [metadata] = HARPI_3D(Ih,varargin)
     
     % input parameters
     mask = api.Mask;                    % Mask
-    Show = api.Show;                    % Show process?
+    Show = api.Show;                    % Show process
     fr   = api.Frames;                  % frames to be analyzed
     Nfr  = numel(fr);                   % number of frames
     method = api.Method;                % interpolation method
-    pspace = api.SpatialSmoothing;      % smoothing factor	
+    eta = api.eta_constant;             % smoothing factor	
     seed = api.Seed;                    % unwrapping seed
     dfac = api.DownsamplingFac;
     
@@ -108,19 +183,19 @@ function [metadata] = HARPI_3D(Ih,varargin)
     %% Displacement estimation
     % Get radial basis functions
     phi = feval(method);
-    s = api.RBFFactor;
+    a = api.a_constant; % Equation (16) and (17) on the paper.
     
     % TODO: add documentation for this part of the code
-    if numel(s) > 1
+    if numel(a) > 1
         if strcmp(api.RBFFacDist,'DecreasingLinear')
-            s = max(s) - (max(s)-min(s))*linspace(0,1,Nfr);
+            a = max(a) - (max(a)-min(a))*linspace(0,1,Nfr);
         elseif strcmp(api.RBFFacDist,'Linear')
-            s = max(s) + (max(s)-min(s))*linspace(0,1,Nfr);
+            a = max(a) + (max(a)-min(a))*linspace(0,1,Nfr);
         elseif strcmp(api.RBFFacDist,'Quadratic')
-            s = min(s) + abs(power(max(s)-min(s),0.4)*linspace(-1,1,Nfr)).^2.5;
+            a = min(a) + abs(power(max(a)-min(a),0.4)*linspace(-1,1,Nfr)).^2.5;
         end
     else
-        s = api.RBFFactor*ones([1 Nfr]);
+        a = api.a_constant*ones([1 Nfr]);
     end
     
     % Grids
@@ -130,7 +205,7 @@ function [metadata] = HARPI_3D(Ih,varargin)
     dZ = Downsample(Z,1:3,dfac);
         
     % Tissue positions on the deformed domain
-    gy  = [dX(:),dY(:),dZ(:)]';
+    G  = [dX(:),dY(:),dZ(:)]';
     
     % Tissue trajectories
     tf_ref = ~isnan(Xphar) & ~isnan(Yphar) & ~isnan(Zphar);
@@ -158,7 +233,7 @@ function [metadata] = HARPI_3D(Ih,varargin)
         catch
             for i=1:Nfr
                 fprintf('\n Smoothing phase on frame %d of %d',i,Nfr);
-                [dXpha(:,:,:,i),dYpha(:,:,:,i),dZpha(:,:,:,i)] = RefPhaseSmoothing3D(dXpha(:,:,:,i),dYpha(:,:,:,i),dZpha(:,:,:,i),method,api.RBFFactor/5,pspace);
+                [dXpha(:,:,:,i),dYpha(:,:,:,i),dZpha(:,:,:,i)] = RefPhaseSmoothing3D(dXpha(:,:,:,i),dYpha(:,:,:,i),dZpha(:,:,:,i),method,api.a_constant/5,eta);
             end
             save([pwd,'/tmp_smoothed_unwrapped_phase.mat'],'dXpha','dYpha','dZpha')        
         end
@@ -166,7 +241,7 @@ function [metadata] = HARPI_3D(Ih,varargin)
     end
     
     % Interpolation loop
-    for i = 2:Nfr
+    for i = 1:Nfr
     
         fprintf('\n Estimating motion on frame %d of %d',i,Nfr);
     
@@ -194,22 +269,16 @@ function [metadata] = HARPI_3D(Ih,varargin)
     
             % Reference tissue positions
             tf_ref = ~isnan(dXphar) & ~isnan(dYphar) & ~isnan(dZphar);
-                    
-            % RBF interpolation
-    %         [xx_vec, Psi] = RBFInterp3D(Pha(:,tf),gy(:,tf),pspace,s(i),Pha_ref(:,tf_ref),phi);
-    %         x_traj(tf_ref) = xx_vec(:,1);
-    %         y_traj(tf_ref) = xx_vec(:,2);
-    %         z_traj(tf_ref) = xx_vec(:,3);
     
             % RBF interpolation
             if j==1
                 r  = rbfx.distanceMatrix3dNew(Pha(1,tf),Pha(2,tf),Pha(3,tf));
-                B = phi.rbf(r,s(i));
-                w = rbfx.solve(B,gy(:,tf)',pspace,true);
+                B = phi.rbf(r,a(i));
+                w = rbfx.solve(B,G(:,tf)',eta,true);
             end
             re = rbfx.distanceMatrix3dNew(Pha(1,tf),Pha(2,tf),Pha(3,tf),...
                          Pha_ref(1,tf_ref),Pha_ref(2,tf_ref),Pha_ref(3,tf_ref));
-            Psi = phi.rbf(re,s(i));
+            Psi = phi.rbf(re,a(i));
             xx_vec = Psi*w;
             x_traj(tf_ref) = xx_vec(:,1);
             y_traj(tf_ref) = xx_vec(:,2);
@@ -220,14 +289,6 @@ function [metadata] = HARPI_3D(Ih,varargin)
             traj(r,:,:,1,i) = x_traj;
             traj(r,:,:,2,i) = y_traj;
             traj(r,:,:,3,i) = z_traj;
-            
-    %         figure(1)
-    %         sl=56;
-    %         imagesc(squeeze(traj(:,:,sl,1,i)),'AlphaData',squeeze(~isnan(traj(:,:,sl,1,i))));
-    %         axis equal;
-    %         set(gca, 'Ydir', 'normal')
-    %         drawnow
-    %         pause
             
         end
     
@@ -240,7 +301,6 @@ function [metadata] = HARPI_3D(Ih,varargin)
                 mag = sqrt((traj(:,:,sl,1,i)-X(:,:,sl)).^2 + ...
                            (traj(:,:,sl,2,i)-Y(:,:,sl)).^2 + ...
                            (traj(:,:,sl,3,i)-Z(:,:,sl)).^2);
-                % mag = sqrt((traj(:,:,sl,3,i)-Z(:,:,sl)).^2);
                 surf(X(:,:,sl),Y(:,:,sl),Z(:,:,sl),mag,'LineStyle','none'); hold on
                 quiver3(X(r,r,sl),Y(r,r,sl),Z(r,r,sl),...
                         squeeze(traj(r,r,sl,1,i)-X(r,r,sl)),...
@@ -282,7 +342,6 @@ function [metadata] = HARPI_3D(Ih,varargin)
     end
     
     % Ouputs
-    % unwrapped_phases = permute(cat(5,dXpha,dYpha,dZpha),[1 2 3 5 4]);
     unwrapped_phases = [];
     metadata = struct(...
         'RawMotion',          u,...

@@ -1,17 +1,67 @@
-function strain = pixelstrain(varargin)
+% Copyright (c) 2016 DENSEanalysis Contributors
+%
+% PIXELSTRAIN Calculate strain tensors based on displacement fields.
+%
+% Description:
+%   This function computes strain tensors (e.g., radial, circumferential, and
+%   principal strains) at each pixel location within a segmented image mask. 
+%   It is based on the original implementation of `pixelstrain` but introduces 
+%   key modifications to use precomputed displacement fields (`dx` and `dy`) 
+%   instead of spline interpolations.
+%
+%   The function calculates strain values by determining the deformation
+%   gradient tensor at each pixel, applying coordinate system rotations,
+%   and computing principal strains and orientations.
+%
+% Inputs:
+%   'X'                - [matrix] Grid of X-coordinates.
+%   'Y'                - [matrix] Grid of Y-coordinates.
+%   'mask'             - [matrix] Logical mask indicating regions of interest.
+%   'times'            - [vector] Time points for displacement measurements.
+%   'dx'               - [matrix] Precomputed X-displacements over time.
+%   'dy'               - [matrix] Precomputed Y-displacements over time.
+%   'Origin'           - [vector] Origin for strain orientation calculations.
+%                         Default: mean(X(mask)), mean(Y(mask)).
+%   'Orientation'      - [matrix] Pixel-level orientation angles (radians).
+%                         Default: calculated based on `Origin`.
+%
+% Outputs:
+%   strain             - [struct] Structure containing the following fields:
+%                         - XX, YY, XY, YX: Strain tensor components.
+%                         - RR, CC, RC, CR: Radial and circumferential strains.
+%                         - p1, p2: Principal strain magnitudes.
+%                         - p1or: Principal strain orientation.
+%                         - vertices: Vertex data for strain visualization.
+%                         - faces: Face data for strain visualization.
+%                         - maskimage: Processed mask for visualization.
+%
+% Differences from the original:
+%   1. Inputs `dx` and `dy` replace `spldx` and `spldy` for displacement data.
+%   2. Spline evaluation logic has been removed, simplifying the code.
+%   3. Validation checks ensure `dx` and `dy` are provided and match expected dimensions.
+%
+% Autor:
+%   DENSEanalysis: - Andrew Gilliam <http://www.adgilliam.com>
+%                  - Andrew Scott <https://github.com/andydscott>
+%                  - David vanMaanen <https://github.com/dpvanmaan>
+%                  - Jonathan Suever <https://suever.com>
+%
+% Collaborator:
+%   Benjamin Lopez (benjamin.lopezf@usm.cl)
+%
+% Licensing:
+%   This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+%   If a copy of the MPL was not distributed with this file, You can obtain one at
+%   http://mozilla.org/MPL/2.0/.
+%
+% Notes:
+%   - Inspired by concepts for geometric masking in Mella et al., "HARP-I: A Harmonic
+%     Phase Interpolation Method for the Estimation of Motion From Tagged MR Images,"
+%     IEEE Transactions on Medical Imaging, vol. 40, no. 4, pp. 1240-1251, April 2021.
+%   - Reference: DOI 10.1109/TMI.2021.3051092
+%
 
-    %PATCHSTRAIN
-    %
-    %
-    %
-    
-    % This Source Code Form is subject to the terms of the Mozilla Public
-    % License, v. 2.0. If a copy of the MPL was not distributed with this
-    % file, You can obtain one at http://mozilla.org/MPL/2.0/.
-    %
-    % Copyright (c) 2016 DENSEanalysis Contributors
-    
-    %% PARSE APPLICATION DATA
+function strain = pixelstrain(varargin)
 
     errid = sprintf('%s:invalidInput',mfilename);
     
@@ -96,9 +146,6 @@ function strain = pixelstrain(varargin)
     end
 
     mask = any(tmp,3) & mask;
-
-
-    %% STRAIN CALCULATION
 
     % determine number of neighbors
     h = [0 1 0; 1 0 1; 0 1 0];
@@ -206,7 +253,6 @@ function strain = pixelstrain(varargin)
                         strain.p1(i,j,fr)   = d(end);
                         strain.p2(i,j,fr)   = d(1);
                         strain.p1or(i,j,fr) = atan2(v(2,2),v(1,2));
-                        % strain.p2or(i,j,fr) = atan2(v(2,1),v(1,1));
                     end
 
                 end
@@ -217,7 +263,7 @@ function strain = pixelstrain(varargin)
 
     end
 
-    %% FACE/VERTEX OUTPUT
+    % FACE/VERTEX OUTPUT
 
     % x/y from X/Y
     x = X(1,:);
@@ -263,9 +309,6 @@ function strain = pixelstrain(varargin)
     strain.vertices    = fv.vertices;
     strain.faces       = fv.faces;
     strain.orientation = theta(tf);
-
 end
-    
-    
-%% END OF FILE=============================================================
+
     

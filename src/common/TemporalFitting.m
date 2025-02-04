@@ -1,12 +1,57 @@
+% Copyright (c) 2025 Hernan Mella
+%
+% TEMPORALFITTING - Performs temporal fitting of displacement fields using polynomial interpolation.
+%
+% Description:
+%   This function fits displacement fields (u) over time using polynomial interpolation. It ensures temporal smoothness 
+%   by fitting a polynomial trajectory to the x and y displacement components for each pixel in a 2D grid. Temporal fitting 
+%   is particularly useful for resampling displacement data with constraints on derivatives at boundary frames.
+%
+% Syntax:
+%   [dxr, dyr] = TemporalFitting(u, 'Mask', mask, 'Frames', fr, 'TemporalOrder', order, 'Show', show)
+%
+% Inputs:
+%   u              - Displacement field (size: [rows, cols, components, frames]).
+%                    `u(:,:,1,:)` represents x-displacements.
+%                    `u(:,:,2,:)` represents y-displacements.
+%   Mask           - (Optional) Binary mask defining active pixels to fit. Default: true(size(u)).
+%   Frames         - (Optional) Indices of frames to resample. Default: [] (all frames).
+%   TemporalOrder  - (Optional) Temporal order of the polynomial fit. Default: 10.
+%   Show           - (Optional) Boolean flag to visualize the results. Default: false.
+%
+% Outputs:
+%   dxr - Fitted/resampled x-displacements (size: [rows, cols, frames]).
+%   dyr - Fitted/resampled y-displacements (size: [rows, cols, frames]).
+%
+% Example:
+%   % Displacement field input (example size: 128x128 grid, 2 components, 30 frames)
+%   u = randn(128, 128, 2, 30);
+%   mask = true(128, 128);
+%   frames = 1:30;
+%   [dxr, dyr] = TemporalFitting(u, 'Mask', mask, 'Frames', frames, 'TemporalOrder', 5, 'Show', true);
+%
+% Author:
+%   Hernan Mella (hernan.mella@pucv.cl)
+%
+% Collaborator:
+%   Benjamin Lopez (benjamin.lopezf@usm.cl)
+%
+% License:
+%   This Source Code Form is subject to the terms of the Mozilla Public 
+%   License, v. 2.0. If a copy of the MPL was not distributed with this 
+%   file, You can obtain one at http://mozilla.org/MPL/2.0/.
+%
+% Notes:
+%   - The polynomial fitting ensures smooth trajectories while preserving temporal consistency.
+%   - Boundary conditions are enforced using first and second derivatives at the initial and final frames.
+%   - Refer to Mella et al., "HARP-I: A Harmonic Phase Interpolation Method for
+%   the Estimation of Motion From Tagged MR Images," IEEE Transactions on Medical Imaging, 
+%   vol. 40, no. 4, pp. 1240-1251, April 2021, for methods inspiring this functionality.
+%   - This based on references 48,50 and 51 thats appear in HARP-I
+%
+
 function [dxr,dyr] = TemporalFitting(u,varargin)
 
-    %% TEMPORAL FITTING
-    % we use the function lsqlin and polyval of the optimization
-    % toolbox to determine the fitted coefficents at all spatial 
-    % locations within the tissue segmentation
-
-    %% PARSE INPUT
-    % Default arguments
     defapi = struct(...
         'Mask',             true(size(u)),...
         'Frames',           [],...
@@ -60,25 +105,12 @@ function [dxr,dyr] = TemporalFitting(u,varargin)
     M4 = bsxfun(@power,time(:),3:-1:0);
 
     % Equality constraints
-    % Aeq_fun = @(T,p) [T(1).^p;
-    %                   T(end).^p;
-    %                   p.*T(1).^max(0,p-1);
-    %                   p.*T(end).^max(0,p-1)];
-    % Beq_fun = @(f,d1,d2) [f(1);
-    %                       f(end);
-    %                       d1;
-    %                       d2];
     Aeq_fun = @(T,p) [T(1).^p;
                       p.*T(1).^max(0,p-1);
                       p.*T(end).^max(0,p-1)];
     Beq_fun = @(f,d1,d2) [f(1);
                           d1;
                           d2];
-    % Aeq_fun = @(T,p) [p.*T(1).^max(0,p-1);
-    %                   p.*T(end).^max(0,p-1)];
-    % Beq_fun = @(f,d1,d2) [d1;
-    %                       d2];
-    
     % Polynomial fitting
     opt = optimoptions('lsqlin','Algorithm','interior-point','Display','off');
     for i=1:Isz(1)
@@ -109,35 +141,12 @@ function [dxr,dyr] = TemporalFitting(u,varargin)
                 else
                     dyr(i,j,:) = polyval(coef,time);
                 end
-
-                % if add_zero
-                %     figure(1)
-                %     subplot 121
-                %     plot(squeeze(dx(i,j,2:end))); hold on
-                %     plot(squeeze(dxr(i,j,:))); hold off
-                %     legend('Original','Fitted')
-                %     subplot 122
-                %     plot(squeeze(dy(i,j,2:end))); hold on
-                %     plot(squeeze(dyr(i,j,:))); hold off
-                %     legend('Original','Fitted')                    
-                % else
-                %     figure(1)
-                %     subplot 121
-                %     plot(time,squeeze(dx(i,j,:))); hold on
-                %     plot(time,squeeze(dxr(i,j,:))); hold off
-                %     legend('Original','Fitted')
-                %     subplot 122
-                %     plot(time,squeeze(dy(i,j,:))); hold on
-                %     plot(time,squeeze(dyr(i,j,:))); hold off
-                %     legend('Original','Fitted')
-                % end
-                
             end
         end
     end
 
 
-    %% PLots
+    % PLots
     if api.Show
         figure,
         for i=1:3:Isz(1)
