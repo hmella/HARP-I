@@ -1,3 +1,52 @@
+% Copyright (c) 2025 Hernan Mella
+%
+% TEMPORALPHASECONSISTENCY - Corrects temporal inconsistencies in phase data.
+%
+% Description:
+%   This function addresses temporal inconsistencies in phase data obtained from
+%   imaging techniques like tagged Magnetic Resonance Imaging (MRI). The method
+%   calculates phase jumps between frames and adjusts them to maintain temporal
+%   consistency, leveraging a distance matrix optimization approach.
+%
+% Syntax:
+%   phase_jumps = TemporalPhaseConsistency(Xpha, Ypha, ref, njumps, ROI)
+%
+% Inputs:
+%   Xpha     - [3D matrix] Unwrapped phase data along the X-axis.
+%   Ypha     - [3D matrix] Unwrapped phase data along the Y-axis.
+%   ref      - [integer] Index of the reference frame.
+%   njumps   - [integer, optional] Number of phase jump levels to test. Default: 1.
+%   ROI      - [array, optional] Region of interest for debugging visualization.
+%
+% Outputs:
+%   phase_jumps - [2xN matrix] Optimal phase jumps for each frame (X and Y).
+%
+% Example:
+%   % Correct phase jumps for a 3D MRI dataset
+%   phase_jumps = TemporalPhaseConsistency(Xpha, Ypha, 1, 2);
+%
+% Author:
+%   Hernán Mella (hernan.mella@pucv.cl)
+%
+% Collaborator:
+%   Benjamin Lopez (benjamin.lopezf@usm.cl)
+%
+% License:
+%   This Source Code Form is subject to the terms of the Mozilla Public License, 
+%   version 2.0. If a copy of the MPL was not distributed with this file, 
+%   you can obtain one at http://mozilla.org/MPL/2.0/.
+%
+% Notes:
+%   - The approach leverages the relationship between distance matrices of
+%     reference and current frames to estimate phase jumps, as detailed in the
+%     PDF  by Mella, H., et al., "HARP-I: A Harmonic Phase Interpolation Method for
+%     the Estimation of Motion From Tagged MR Images," IEEE Transactions on
+%     Medical Imaging, vol. 40, no. 4, 2021. section "Strategies for Correcting
+%     Temporal Phase Inconsistencies" 
+%   - This method ensures phase consistency without imposing restrictions on
+%     temporal resolution or segmentations 
+%
+
 function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
 
     if nargin<5
@@ -22,7 +71,7 @@ function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
     ref_pha_max = max(ref_pha,[],2);
 
     % Reference distance matrix
-    r_ref = distanceMatrix2dNew(ref_pha(1,tf_ref),ref_pha(2,tf_ref),...
+    r_ref = rbfx.distanceMatrix2dNew(ref_pha(1,tf_ref),ref_pha(2,tf_ref),...
                 ref_pha(1,tf_ref),ref_pha(2,tf_ref));
     r_ref_max = max(r_ref(:));
 
@@ -53,7 +102,7 @@ function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
                             flatten(Ypha(:,:,i))+jumps_y(jy)]';
 
                     % Distance matrix
-                    r = distanceMatrix2dNew(pha(1,tf),pha(2,tf),...
+                    r = rbfx.distanceMatrix2dNew(pha(1,tf),pha(2,tf),...
                     ref_pha(1,tf_ref),ref_pha(2,tf_ref));
                     r_max = max(r(:));
 
@@ -83,7 +132,7 @@ function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
           tf = ~isnan(Xpha(:,:,i)) & ~isnan(Ypha(:,:,i));
 
           % Uncorrected distance matrix
-          r = distanceMatrix2dNew(pha(1,tf),pha(2,tf),...
+          r = rbfx.distanceMatrix2dNew(pha(1,tf),pha(2,tf),...
           ref_pha(1,tf_ref),ref_pha(2,tf_ref));
 
           % Corrected phase
@@ -92,7 +141,7 @@ function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
           cpha(2,:) = cpha(2,:) + phase_jumps(2,i);
 
           % Uncorrected distance matrix
-          r = distanceMatrix2dNew(cpha(1,tf),cpha(2,tf),...
+          r = rbfx.distanceMatrix2dNew(cpha(1,tf),cpha(2,tf),...
           ref_pha(1,tf_ref),ref_pha(2,tf_ref));
 
           % plot images

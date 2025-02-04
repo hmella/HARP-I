@@ -1,5 +1,66 @@
-classdef HARPFilter
+% Copyright (c) 2025 Hernan Mella
+%
+% HARPFilter - Implements a HARP filter for image segmentation and analysis.
+%
+% Description:
+%   This class allows generating and applying custom filters (Butterworth, 
+%   Gabor, or Transmission) in the frequency domain (k-space) to process images.
+%   It is particularly useful in medical imaging analysis, such as MRI.
+%
+% Properties:
+%   - image_size: Dimensions of the input image.
+%   - direction: Directions of the central frequencies.
+%   - central_freq: Central frequencies of interest.
+%   - search_window: Search window for estimating harmonic frequencies.
+%   - center: Initial coordinates of the harmonic frequencies.
+%   - type: Type of filter ('Butterworth', 'Gabor', 'Transmission').
+%   - lambda: Aspect ratio for the Gabor filter.
+%   - cutoff: Cutoff frequency for the Butterworth filter.
+%   - order: Order of the Butterworth filter.
+%   - kspace_filter: Generated filters in the k-space.
+%   - frequency_components: Angular frequency components.
+%   - wave_vectors: Wave vectors for central frequencies.
+%
+% Methods:
+%   - AngularFrequencies: Computes angular components in the k-space.
+%   - Transmission: Generates a Transmission filter.
+%   - Butterworth: Creates a Butterworth filter.
+%   - Gabor: Implements a Gabor filter.
+%   - filter: Applies the generated filters to an image.
+%
+% Example:
+%   % Create a HARP filter
+%   image_data = rand(256, 256, 2); % Simulated image data
+%   filter = HARPFilter('Image', image_data, ...
+%                       'CentralFreq', [0.3 0.3], ...
+%                       'FilterType', 'Butterworth', ...
+%                       'Butterworth_cuttoff', 20);
+%
+%   % Apply the filter
+%   filtered_image = filter.filter(image_data);
+%
+% Author:
+%   Hernan Mella (hernan.mella@pucv.cl)
+%
+% Collaborator:
+%   Benjamin Lopez (benjamin.lopezf@usm.cl)
+%
+% License:
+%   This Source Code Form is subject to the terms of the Mozilla Public License, 
+%   version 2.0. If a copy of the MPL was not distributed with this file, 
+%   you can obtain one at http://mozilla.org/MPL/2.0/.
+%
+% Notes:
+%   - This implementation is directly based on the methods described in the paper:
+%     Mella et al., "HARP-I: A Harmonic Phase Interpolation Method for the 
+%     Estimation of Motion From Tagged MR Images," IEEE Transactions on Medical 
+%     Imaging, vol. 40, no. 4, pp. 1240-1251, April 2021.
+%   - Reference: DOI 10.1109/TMI.2021.3051092
+%   - This code represents the computational implementation of the key concepts 
+%     discussed in the aforementioned publication.
+%
 
+classdef HARPFilter
     properties
         image_size
         direction
@@ -87,9 +148,6 @@ classdef HARPFilter
         
         % K space frequencies
         function W = AngularFrequencies(obj,Rg1,Rg2,k1,k2)
-        % O: the angular frequency omega
-        % Or: the rotated angular frequency
-        % Oc: the central frequency of the filers
 
             % Ranges for frequency images
             rows = obj.image_size(1);

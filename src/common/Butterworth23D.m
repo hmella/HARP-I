@@ -1,59 +1,62 @@
-function [f, Rg, BfRg, WRg]= Butterworth23D(sze, WaveVec, n, sinmod)
-% Design a butterworth bandpass filer for 2D/3D SinMod analysis.
-% This is similar to a lowpass filter except a shift of origin
-% The range of frequency matrix is from -0.5 to 0.5, x is horizontal
-% direction, y in vertical direction, z in slice direction
-% Usage: 
-%         f = myBandFilter23D([256,256], [8,0], 5)
-%         f = myBandFilter23D([256,256], [8,0,0], 5)
+% Copyright (c) 2025 Hernan Mella
+%
+% BUTTERWORTH23D - Creates a 2D/3D Butterworth bandpass filter for SinMod analysis.
+%
+% Description:
+%   This function designs a Butterworth bandpass filter for 2D or 3D data.
+%   The filter is used for frequency-domain analysis, especially in applications
+%   requiring frequency separation along specified wave vectors.
+%
+% Syntax:
+%   [f, Rg, BfRg, WRg] = Butterworth23D(sze, WaveVec, n, sinmod)
+%
 % Inputs:
-%    sze    is a 2 or 3 element vector specifying the size of filter 
-%           to construct [rows cols] for 2D. e.g, [256, 256]
-%                        [rows cols slices] for 3D, e.g., [112,112,112]
-%    WaveVec
+%   sze    - A vector specifying the size of the filter:
+%            [rows, cols] for 2D (e.g., [256, 256])
+%            [rows, cols, slices] for 3D (e.g., [112, 112, 112]).
+%   WaveVec - Wave vector defining the direction and magnitude of the filter
+%             [WaveX, WaveY] for 2D, [WaveX, WaveY, WaveZ] for 3D.
+%   n      - Order of the Butterworth filter (integer >= 1). Higher values 
+%            result in sharper transitions.
+%   sinmod - Boolean flag to determine whether to calculate sinusoidal 
+%            modulation components along the wave vector.
 %
-%    n     : is the order of the filter, the higher n is the sharper
-%            the transition is. (n must be an integer >= 1).
-%            Note that n is doubled so that it is always an even integer.
 % Outputs:
-%                      1
-%      f =    --------------------
-%                              2n
-%              1.0 + (w/cutoff)
+%   f      - The Butterworth filter in frequency space.
+%   Rg     - Indices of significant frequency components (circle in the polar
+%            frequency domain).
+%   BfRg   - Filter values at the significant frequency components.
+%   WRg    - Frequency components along the wave vector.
 %
-% The frequency origin of the returned filter is at the corners.
-% Refer to Peter Kovesi,
-% http://www.csse.uwa.edu.au/~pk/research/matlabfns/#freqfilt
-%==========================================================================
-% Example 1: 3D filter, wave vector in x direction, right-side spectrum ball
-% sze = [112,112,112]; wave = [14 0 0];
-% [f, Rg, BfRg, WRg]= myBandFilterButterworth23D(sze,wave, 5);
-% BfRgM=zeros(sze);BfRgM(Rg)=BfRg;figure,imshow(BfRgM(:,:,sze(3)/2),[]);impixelinfo
-% for i = 48:65 figure,imshow(squeeze(BfRgM(:,:,i)),[]);impixelinfo; end
-%==========================================================================
-% Example 2: 3D filter, wave vector in y direction, front-side spectrum ball
-% sze = [112,112,112]; wave = [0 14 0];
-% [f, Rg, BfRg, WRg]= myBandFilterButterworth23D(sze,wave, 5);
-% BfRgM=zeros(sze);BfRgM(Rg)=BfRg;figure,imshow(BfRgM(:,:,sze(3)/2),[]);impixelinfo
-% for i = 48:65 figure,imshow(squeeze(BfRgM(:,:,i)),[]);impixelinfo; end
-%==========================================================================
-% Example 3: 3D filter, wave vector in z direction, up-side spectrum ball
-% sze = [112,112,112]; wave = [0 0 14];
-% [f, Rg, BfRg, WRg]= myBandFilterButterworth23D(sze,wave, 5);
-% BfRgM=zeros(sze);BfRgM(Rg)=BfRg;figure,imshow(squeeze(BfRgM(:,sze(2)/2,:)),[]);impixelinfo
-% for i = 56:72 figure,imshow(squeeze(BfRgM(:,:,i)),[]);impixelinfo; end
-%==========================================================================
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Hui Wang, 10/25/2011
-% Update: 11/4/2011 
-% Update: 2/28/2012, add examples
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Example 1: 2D Filter
+%   sze = [256, 256]; 
+%   wave = [8, 0]; 
+%   [f, Rg, BfRg, WRg] = Butterworth23D(sze, wave, 5, false);
+%
+% Example 2: 3D Filter
+%   sze = [112, 112, 112]; 
+%   wave = [0, 14, 0]; 
+%   [f, Rg, BfRg, WRg] = Butterworth23D(sze, wave, 5, true);
+%
+% Author:
+%   Hui Wang (https://scholar.google.com/citations?user=Ym03m88AAAAJ&hl=en)
+%   Updated: November 4, 2011, February 28, 2012
+%
+% License:
+%   This Source Code Form is subject to the terms of the Mozilla Public License, 
+%   version 2.0. If a copy of the MPL was not distributed with this file, 
+%   you can obtain one at http://mozilla.org/MPL/2.0/.
+%
+% Notes:
+%   - This implementation aligns with methods described in:
+%     Mella et al., "HARP-I: A Harmonic Phase Interpolation Method for the 
+%     Estimation of Motion From Tagged MR Images," IEEE Transactions on 
+%     Medical Imaging, vol. 40, no. 4, pp. 1240-1251, April 2021.
+%   - Reference: DOI 10.1109/TMI.2021.3051092
+%
 
-% shift:  frequency shift of origin to off-center peak, instead of DC peak.
-%         when shift = [0,0], it is a lowpass filter
-% cutoff: the cutoff frequency of the filter 0 - 0.5
-% WaveVec = Nx/d, shift/(1/2) = d/(Nx/2), therefore, shift = 1/WaveVec
-% where d=(pixel distance between first and second peak)
+
+function [f, Rg, BfRg, WRg]= Butterworth23D(sze, WaveVec, n, sinmod)
 dGrid=sqrt(sum(WaveVec.^2));  
 shift = (1./dGrid)*(WaveVec/dGrid); 
 cutoff = 0.8*(1./dGrid);    % at cutoff frequency, f = 0.5;
@@ -73,9 +76,6 @@ else
     rows = sze(1); cols = sze(2);
 end
 
-% Set up X and Y matrices with ranges normalised to +/- 0.5
-% The following code adjusts things appropriately for odd and even values
-% of rows and columns.
 if mod(cols,2)
     xrange = [-(cols-1)/2:(cols-1)/2]/(cols-1);
 else
@@ -92,7 +92,6 @@ if numel(sze)==2
     [x,y] = meshgrid(xrange, yrange);
     radius = sqrt((x - shift(1)).^2 + (y - shift(2)).^2);   % A matrix with every pixel = radius relative to off centre.
     f = ifftshift( 1.0 ./ (1.0 + (radius ./ cutoff).^(2*n)) );
-    %----Connect this with 2D SinMod, since SinMod needs Rg, BfRg, WRg
     Rg = find(f>0.005); % circle in polar frequency domain, is 0.005 ok?
     BfRg = f(Rg);
     if sinmod
@@ -100,7 +99,6 @@ if numel(sze)==2
     else
         WRg=c*x+s*y; % frequency component along wave vector
     end
-    %----------------------------------------------------------------
 
 elseif numel(sze)==3
     slices = sze(3);
@@ -115,8 +113,6 @@ elseif numel(sze)==3
     x = x+1e-8; y = y+1e-8; z = z+1e-8;    % Avoid 0
     radius = sqrt((x - shift(1)).^2 + (y - shift(2)).^2 + (z - shift(3)).^2);   % A matrix with every pixel = radius relative to off centre.
     f =  1.0./(1.0 + (radius./cutoff).^(2*n));
-
-    %----Connect this with 3D SinMod, since SinMod needs Rg, BfRg, WRg----
     Rg = find(f > 0.05); 
     BfRg = f(Rg);
     if sinmod
@@ -124,8 +120,6 @@ elseif numel(sze)==3
     else
         WRg=c*x+s*y+v*z; % frequency component along wave vector
     end        
-    %BfRgM=zeros(sze);BfRgM(Rg)=BfRg;figure,imshow(BfRgM(:,:,sze(3)/2),[]); % debug, hui
-    %---------------------------------------------------------------------
 end
 end
 
