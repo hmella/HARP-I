@@ -38,7 +38,7 @@
 %   Hernan Mella (hernan.mella@pucv.cl)
 %
 % Collaborator:
-%   Benjamin Lopex (Benjamin.lopezf@usm.cl)
+%   Benjamin Lopez (Benjamin.lopezf@usm.cl)
 %
 % License:
 %   This Source Code Form is subject to the terms of the Mozilla Public License, 
