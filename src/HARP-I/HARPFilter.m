@@ -234,8 +234,18 @@ classdef HARPFilter
 
         % Filter image
         function Ih = filter(obj,I)
-            H  = repmat(obj.kspace_filter, [1 1 1 obj.image_size(end)]);
-            Ih = ktoi(H.*itok(I, [1 2]), [1 2]);
+            % Implicit expansion over the frame dimension: replicating the
+            % filter with repmat allocated a full [rows cols enc frames]
+            % copy for nothing. It also used obj.image_size(end), the frame
+            % count of the image passed to the CONSTRUCTOR, so filtering a
+            % stack with a different number of frames silently mis-sized the
+            % filter; broadcasting removes that failure mode entirely.
+            if ~isequal(size(I,[1 2]), size(obj.kspace_filter,[1 2]))
+                error([class(obj) ':sizeMismatch'], ...
+                    'Image is %s but this filter was built for %s.', ...
+                    mat2str(size(I,[1 2])), mat2str(size(obj.kspace_filter,[1 2])));
+            end
+            Ih = ktoi(obj.kspace_filter .* itok(I, [1 2]), [1 2]);
         end
 
     end

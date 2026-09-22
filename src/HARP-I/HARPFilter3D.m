@@ -114,8 +114,16 @@ classdef HARPFilter3D
 
         % Filter image
         function Ih = filter(obj,I)
-            H  = repmat(obj.kspace_filter, [1 1 1 1 size(I,5)]);
-            Ih = ktoi(H.*itok(I, [1 2 3]), [1 2 3]);
+            % Implicit expansion over the frame dimension. The repmat
+            % materialised an [Nx Ny Nz 3 Nfr] copy of the filter purely to
+            % multiply elementwise -- for a 112^3 x 3 x 22 volume that is
+            % about 0.7 GB of avoidable allocation.
+            if ~isequal(size(I,[1 2 3]), size(obj.kspace_filter,[1 2 3]))
+                error([class(obj) ':sizeMismatch'], ...
+                    'Volume is %s but this filter was built for %s.', ...
+                    mat2str(size(I,[1 2 3])), mat2str(size(obj.kspace_filter,[1 2 3])));
+            end
+            Ih = ktoi(obj.kspace_filter .* itok(I, [1 2 3]), [1 2 3]);
         end
 
     end
