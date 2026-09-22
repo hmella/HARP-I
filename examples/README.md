@@ -5,14 +5,14 @@ To view the results of each demo, ensure that all dependencies are installed cor
 
 ## Motion estimation from 2D tagged images
 
-The `demo2d.m` MATLAB script demonstrates the process of **2D cardiac motion and strain estimation** using HARP-I. The workflow consists of the following key steps:
+The `demo_2D.m` MATLAB script demonstrates the process of **2D cardiac motion and strain estimation** using HARP-I. The workflow consists of the following key steps:
 
 ### 1. Data Loading
-- Loads a **2D tagged MRI dataset** (`data.mat`), which contains image data (`I`), a segmentation mask (`mask`), and relevant imaging parameters (`pixelsize`, `tagspacing`).
+- Loads a **2D tagged MRI dataset** (`data_2D.mat`), which contains image data (`I`), a segmentation mask (`mask`), and relevant imaging parameters (`pixelsize`, `tagspacing`).
 - Extracts the image size and the number of frames for further processing.
 
 ```matlab
-load('data/data.mat')
+load('../data/data_2D.mat')
 
 % Image
 I = data.image;
@@ -57,7 +57,6 @@ args = struct(...
         'eta_constant',         15,... % equation (8) on the paper.
         'Connectivity',         4,...
         'RefPhaseSmoothing',    true,...
-        'ROI',                  [86 132 68 114],...
         'TemporalFitting',      true,...
         'TemporalFittingOrder', 10);
 harpi = HARPI(If, args);
@@ -133,15 +132,14 @@ HARP-I allows you to modify the **RBF** to suit your needs.  To change the RBF, 
 
 ## Motion estimation from 3D tagged images
 
-The `demo3d.m` MATLAB script demonstrates the process of **3D cardiac motion and strain estimation** using **HARP-I**. The workflow includes the following key steps:
+The `demo_3D.m` MATLAB script demonstrates the process of **3D cardiac motion and strain estimation** using **HARP-I**. The workflow includes the following key steps:
 
 ### 1. Data Loading
 - Loads **3D tagged MRI image data** (`I`), segmentation masks (`mask`), and imaging parameters (`info`).
 - Reorders taglines in the images for **consistent orientation** and **visualizes the tagged images** for qualitative assessment.
 
 ```matlab
-path = 'data/data_3D/';
-load([path,'data_for_processing.mat'], 'I', 'mask', 'info')
+load('../data/data_3D.mat', 'I', 'mask', 'info')
 
 % Image size
 Isz  = size(I,1:3);
@@ -169,7 +167,7 @@ wave_vecs = 2*(spacing/vxsz(1))*[1,0,0;
                                  0,1,0;
                                  0,0,1];
 filter = HARPFilter3D(struct('Image',I, 'WaveVec',wave_vecs, 'SinMod',false,...
-                            'FilterType','Butterworth', 'Gabor_lambda',2,...
+                            'FilterType','Butterworth',...
                             'Butterworth_order',5));
 
 % Apply filter
@@ -190,9 +188,7 @@ args = struct(...
         'a_constant',       [1 1]*150/(spacing/vxsz(1)),... % Equation (16) and (17) in the paper.
         'RBFFacDist',       'Linear',...
         'eta_constant',     15,... % Equation (8) in the paper.
-        'Connectivity',     4,...
         'RefPhaseSmoothing',false,...
-        'ROI',              [50 120 50 120],...
         'TemporalFitting',  false,...
         'TemporalFittingOrder', 10,...
         'DownsamplingFac',  4);

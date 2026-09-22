@@ -55,7 +55,6 @@ args = struct(...
         'eta_constant',         15,... % equation (8) on the paper.
         'Connectivity',         4,...
         'RefPhaseSmoothing',    true,...
-        'ROI',                  [86 132 68 114],...
         'TemporalFitting',      true,...
         'TemporalFittingOrder', 10);
 harpi = HARPI(If, args);
@@ -76,13 +75,32 @@ options = struct(...
     'Origin', [],...
     'Orientation', []);
 st = pixelstrain(options);
-RR = NaN([Isz(1) Isz(2) Nfr]);
-CC = NaN([Isz(1) Isz(2) Nfr]);
-RR(repmat(st.maskimage,[1 1 Nfr])) = st.p1(:);
-CC(repmat(st.maskimage,[1 1 Nfr])) = st.p2(:);
+
+% NOTE on which strain is which.
+%   st.RR / st.CC  radial and circumferential components of the Lagrangian
+%                  strain tensor -- the quantities reported in the paper and
+%                  the ones strain_curves2D.m plots.
+%   st.p1 / st.p2  1st and 2nd principal strains (eigenvalues of E).
+% This script used to assign st.p1/st.p2 to variables *named* RR/CC, so the
+% animation below and strain_curves2D.m showed different quantities under the
+% same labels. Both are now computed under their own names; the committed
+% GIFs were produced with 'p2', which stays the default for reproducibility.
+STRAIN_FOR_DISPLAY = 'p2';   % 'CC' = circumferential (paper) | 'p2' = 2nd principal
+
+expand = @(v) reshape_masked(v, st.maskimage, Isz, Nfr);
+RR = expand(st.RR);   % radial (Lagrangian)
+CC = expand(st.CC);   % circumferential (Lagrangian)
+P1 = expand(st.p1);   % 1st principal
+P2 = expand(st.p2);   % 2nd principal
+
+switch STRAIN_FOR_DISPLAY
+    case 'CC', StrainMap = CC; strain_label = 'E_{cc} (circumferential)';
+    case 'p2', StrainMap = P2; strain_label = '2nd principal strain';
+    otherwise, error('Unknown STRAIN_FOR_DISPLAY: %s', STRAIN_FOR_DISPLAY);
+end
 
 %% Save motion and strain estimation
-save('motion2D_HARPI.mat','harpi','st')
+save('motion2D_HARPI.mat','harpi','st','RR','CC','P1','P2')
 
 %% Show results
 % gif path
@@ -127,7 +145,8 @@ for i=1:size(ui,4)
 
     % Strain map
     ax2 = nexttile;
-    imagesc(CC(:,:,i),'AlphaData',~isnan(CC(:,:,i))); caxis([a b])
+    imagesc(StrainMap(:,:,i),'AlphaData',~isnan(StrainMap(:,:,i))); clim([a b])
+    title(strain_label)
     set(gca,'YDir','normal') 
     cc = flipud(jet);
     colormap(ax2,cc)
@@ -145,4 +164,10 @@ for i=1:size(ui,4)
     end
 
     pause(0.1);
+end
+
+function out = reshape_masked(vals, maskimage, Isz, Nfr)
+%RESHAPE_MASKED Scatter per-pixel strain values back onto the image grid.
+    out = NaN([Isz(1) Isz(2) Nfr]);
+    out(repmat(maskimage,[1 1 Nfr])) = vals(:);
 end
