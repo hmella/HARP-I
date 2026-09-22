@@ -71,17 +71,38 @@ defapi = struct(...
         'ContourRes',         0.5);
 
 % check inputs
-api = parseinputs(defapi, [], varargin{:});
+[api, extra_args] = parseinputs(defapi, [], varargin{:});
+assertNoUnknownArgs(mfilename, extra_args);
+
+% validate
+if isempty(api.Contour) || ~isstruct(api.Contour) && ~isobject(api.Contour)
+    error([mfilename ':invalidContour'], ...
+        ['''Contour'' must be a cline object (or struct) with a Position ' ...
+         'field; got %s. Note the parameter is singular: ''Contour''.'], ...
+        class(api.Contour));
+end
+if isempty(api.MaskSize) || numel(api.MaskSize) < 2
+    error([mfilename ':invalidMaskSize'], '''MaskSize'' must be [rows cols].');
+end
 
 % contours loop
-linesegments = {};
-masksegments = {};
-for i = 1:numel(api.Contour.Position)
+Ncontour     = numel(api.Contour.Position);
+linesegments = cell(1, Ncontour);
+masksegments = cell(1, Ncontour);
+for i = 1:Ncontour
+
+    pos = api.Contour.Position{1,i};
+
+    % Honour the per-point flags carried by the contour. These describe what
+    % the user actually drew; hardcoding them (as this function used to)
+    % silently discarded every corner point placed in the GUI.
+    isclosed = contour_flag(api.Contour, 'IsClosed', i, true,  1);
+    iscurved = contour_flag(api.Contour, 'IsCurved', i, true,  size(pos,1));
+    iscorner = contour_flag(api.Contour, 'IsCorner', i, false, size(pos,1));
 
     % contours segment
-    linesegments{i} = clinesegments(api.Contour.Position{1,i},...
-        true,true(size(api.Contour.Position{1,i})),...
-        false,api.ContourRes);
+    linesegments{i} = clinesegments(pos, isclosed, iscurved, iscorner, ...
+                                    api.ContourRes);
 
     % mask segments
     tmp = linesegments{i};
@@ -93,7 +114,29 @@ end
 [X, Y] = meshgrid(1:api.MaskSize(2),1:api.MaskSize(1));
 mask = maskSA(X,Y,masksegments);
 
-return;
+end
 
+% =========================================================================
+function val = contour_flag(C, name, idx, default, n)
+%CONTOUR_FLAG Fetch a per-contour flag, falling back to a scalar default.
+    val = repmat(default, [n 1]);
+    if ~isprop(C, name) && ~isfield(C, name)
+        return
+    end
+    raw = C.(name);
+    if iscell(raw)
+        if idx > numel(raw); return; end
+        raw = raw{idx};
+    end
+    if isempty(raw); return; end
+    raw = logical(raw(:));
+    if isscalar(raw)
+        val = repmat(raw, [n 1]);
+    elseif numel(raw) == n
+        val = raw;
+    end
+    if n == 1
+        val = val(1);
+    end
 end
 

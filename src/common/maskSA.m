@@ -62,7 +62,25 @@
 
 function tf = maskSA(X,Y,C)
 
-    [inep,onep] = inpolygon(X,Y,C{1}(:,1),C{1}(:,2));
-    [inen,onen] = inpolygon(X,Y,C{2}(:,1),C{2}(:,2));
-    tf = (inep & ~inen) | onep | onen;
+    % Generic short-axis mask: inside the outermost contour and outside every
+    % inner one. C{1} is the epicardium, C{2..} the inner boundaries. The old
+    % implementation indexed C{1}/C{2} unconditionally and silently dropped
+    % (or errored on) any other number of contours.
+    if isempty(C)
+        error([mfilename ':noContours'], 'At least one contour is required.');
+    end
+
+    [outer, on] = inpolygon(X, Y, C{1}(:,1), C{1}(:,2));
+
+    tf = outer;
+    for k = 2:numel(C)
+        [inner, on_k] = inpolygon(X, Y, C{k}(:,1), C{k}(:,2));
+        tf = tf & ~inner;
+        on = on | on_k;
+    end
+
+    % Points lying exactly on a contour count as wall (matching the original
+    % behaviour), but only where they are inside the outer boundary -- so a
+    % contour drawn outside the epicardium cannot leak pixels into the mask.
+    tf = tf | (on & outer);
 end

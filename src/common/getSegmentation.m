@@ -101,18 +101,31 @@ function getSegmentation_OpeningFcn(hObject, eventdata, handles, varargin)
   handles.contours_isclosed = cell([1 handles.Nfr]);
   handles.contours_iscorner = cell([1 handles.Nfr]);
   handles.contours_iscurved = cell([1 handles.Nfr]);
-  try 
-      handles.contours = {varargin{1}.Contours};
-      for i=1:handles.Nfr
-          for j=1:handles.contours_number
-              handles.contours_positions{i}{j} = handles.contours{i}.Position{j};
-              handles.contours_isclosed{i}{j} = handles.contours{i}.IsClosed{j};
-              handles.contours_iscorner{i}{j} = handles.contours{i}.IsCorner{j};
-              handles.contours_iscurved{i}{j} = handles.contours{i}.IsCurved{j};              
+  if isfield(varargin{1}, 'Contours') && ~isempty(varargin{1}.Contours)
+      loaded = varargin{1}.Contours;
+      if ~iscell(loaded); loaded = {loaded}; end
+      try
+          handles.contours = loaded;
+          for i = 1:min(handles.Nfr, numel(loaded))
+              if isempty(loaded{i}); continue; end
+              for j = 1:numel(loaded{i}.Position)
+                  handles.contours_positions{i}{j} = loaded{i}.Position{j};
+                  handles.contours_isclosed{i}{j}  = loaded{i}.IsClosed{j};
+                  handles.contours_iscorner{i}{j}  = loaded{i}.IsCorner{j};
+                  handles.contours_iscurved{i}{j}  = loaded{i}.IsCurved{j};
+              end
           end
+      catch err
+          % Leave the GUI in a usable (empty) state rather than half-loaded.
+          handles.contours           = cell([1 handles.Nfr]);
+          handles.contours_positions = cell([1 handles.Nfr]);
+          handles.contours_isclosed  = cell([1 handles.Nfr]);
+          handles.contours_iscorner  = cell([1 handles.Nfr]);
+          handles.contours_iscurved  = cell([1 handles.Nfr]);
+          warning('getSegmentation:contourLoadFailed', ...
+                  'Could not load supplied contours (%s); starting empty.', ...
+                  err.message);
       end
-  catch
-      fprintf('\n No contours were found on inputs arguments')
   end
   
   % Initial frame
@@ -133,7 +146,7 @@ function getSegmentation_OpeningFcn(hObject, eventdata, handles, varargin)
   handles.caxis = [0 0.5];
 
   % Image positions
-  [X,Y] = meshgrid(0:(handles.Isz(2)-1),0:(handles.Isz(1)-1));
+  [X,Y] = meshgrid(1:handles.Isz(2),1:handles.Isz(1));
   handles.X = X;
   handles.Y = Y;
 
@@ -238,8 +251,8 @@ function preview_mask_Callback(hObject, eventdata, handles)
 
 args = struct(...
     'MaskSize',     handles.Isz,...
-    'Contours',     handles.contours{handles.frame},...
-    'Resolution',   0.5);
+    'Contour',      handles.contours{handles.frame},...
+    'ContourRes',   0.5);
 handles.mask(:,:,handles.frame) = getMask(args); 
 
 % Update plots
@@ -266,8 +279,8 @@ for frame=1:handles.Nfr
     if ~isempty(handles.contours{frame})
         args = struct(...
             'MaskSize',     handles.Isz,...
-            'Contours',     handles.contours{frame},...
-            'Resolution',   0.5);
+            'Contour',      handles.contours{frame},...
+            'ContourRes',   0.5);
         handles.mask(:,:,frame) = getMask(args);
     end
 end
