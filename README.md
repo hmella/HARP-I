@@ -40,25 +40,24 @@ To install **HARP-I**, follow these steps:
    HARPIsetup
    ```
 
-### Important: search-path order
+### Search path order
 
-DENSEanalysis ships its own, **incompatible** `pixelstrain` (and a copy of
-`parseinputs`). MATLAB resolves a function name to whichever directory comes first
-on the search path, so if DENSEanalysis is added *after* HARP-I the demos fail with
-the misleading error:
+DENSEanalysis ships an incompatible `pixelstrain`, and a copy of
+`parseinputs`. MATLAB resolves a name to whichever directory comes first on
+the search path, so adding DENSEanalysis after HARP-I makes the demos fail
+with:
 
 ```
 Error using pixelstrain
 Invalid spline data.
 ```
 
-`HARPIsetup` now enforces the correct order (DENSEanalysis first, HARP-I last) and
-reports any HARP-I function that is still shadowed. If you manage the path yourself,
-call:
+`HARPIsetup` adds DENSEanalysis first and HARP-I last, and reports any
+HARP-I function that is still shadowed. If you manage the path yourself:
 
 ```matlab
-harpi_paths                                            % auto-detect DENSEanalysis
-harpi_paths('DENSEanalysis', '/path/to/denseanalysis')  % or point at it explicitly
+harpi_paths                                             % find DENSEanalysis
+harpi_paths('DENSEanalysis', '/path/to/denseanalysis')  % or give its location
 ```
 
 ## Examples  

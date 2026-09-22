@@ -93,9 +93,7 @@ for i = 1:Ncontour
 
     pos = api.Contour.Position{1,i};
 
-    % Honour the per-point flags carried by the contour. These describe what
-    % the user actually drew; hardcoding them (as this function used to)
-    % silently discarded every corner point placed in the GUI.
+    % Per-point flags carried by the contour, describing what was drawn.
     isclosed = contour_flag(api.Contour, 'IsClosed', i, true,  1);
     iscurved = contour_flag(api.Contour, 'IsCurved', i, true,  size(pos,1));
     iscorner = contour_flag(api.Contour, 'IsCorner', i, false, size(pos,1));

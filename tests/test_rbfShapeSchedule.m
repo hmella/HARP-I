@@ -10,9 +10,8 @@ function testScalarIsConstant(t)
 end
 
 function testEqualBoundsCollapseToConstant(t)
-    % This is the demo's configuration: a_constant = [1 1]*37.5, so every
-    % schedule must collapse to a constant. It is why the schedule fixes are
-    % numerically inert for demo_2D.
+    % The demo uses a_constant = [1 1]*37.5, so every schedule collapses to
+    % a constant.
     for d = {'Linear','DecreasingLinear','Quadratic'}
         a = rbfShapeSchedule([1 1]*37.5, d{1}, 7);
         verifyEqual(t, a, 37.5*ones(1,7), 'AbsTol', 1e-12, ...
@@ -21,8 +20,6 @@ function testEqualBoundsCollapseToConstant(t)
 end
 
 function testLinearRampsLowToHigh(t)
-    % Regression: the old formula was max + (max-min)*t, which ran from 45 to
-    % 60 and never visited 30 at all.
     a = rbfShapeSchedule([30 45], 'Linear', 4);
     verifyEqual(t, a(1),   30, 'AbsTol', 1e-12);
     verifyEqual(t, a(end), 45, 'AbsTol', 1e-12);
@@ -37,8 +34,6 @@ function testDecreasingLinearRampsHighToLow(t)
 end
 
 function testCaseInsensitive(t)
-    % Regression: the default was 'quadratic' but the branches tested
-    % 'Quadratic' with strcmp, so no branch fired and a kept length 2.
     a = rbfShapeSchedule([30 45], 'quadratic', 6);
     verifyLength(t, a, 6);
 end

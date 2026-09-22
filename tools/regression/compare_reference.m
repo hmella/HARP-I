@@ -4,13 +4,13 @@ function ok = compare_reference(fileA, fileB, varargin)
 %   ok = compare_reference(refA, refB)
 %   ok = compare_reference(refA, refB, 'Tol', 1e-12, 'Verbose', true)
 %
-%   Prints max|d|, rms(d) and the relative error for every shared field, and
-%   for the unwrapped-phase fields additionally checks that the integer wrap
-%   counts round((a-b)/2pi) are identically zero -- a phase that differs by a
-%   whole number of cycles is a different answer, not a rounding difference.
+%   Prints max|d|, rms(d) and the relative error for every shared field. For
+%   the unwrapped phase it also checks that the integer wrap counts
+%   round((a-b)/2pi) are zero, since a whole number of cycles is a different
+%   answer rather than a rounding difference.
 %
-%   Returns false (and, under -batch, exits non-zero) if any field exceeds
-%   the tolerance, so it can gate a commit.
+%   Returns false, and under -batch exits non-zero, if any field is outside
+%   the tolerance.
 %
 %   See also CAPTURE_REFERENCE.
 
@@ -50,7 +50,7 @@ function ok = compare_reference(fileA, fileB, varargin)
         end
     end
 
-    % integer wrap-count check on the unwrapped phases
+    % integer wrap count check on the unwrapped phases
     for n = {'uXpha', 'uYpha', 'unwrapped'}
         if isfield(A, n{1}) && isfield(B, n{1})
             d = A.(n{1}) - B.(n{1});
@@ -109,7 +109,7 @@ function [ok, rows] = compare_array(a, b, name, tol)
     a = double(a(:)); b = double(b(:));
     finite = isfinite(a) & isfinite(b);
 
-    % NaN patterns must agree -- a NaN moving is a real change
+    % the NaN pattern has to match, a moved NaN is a real change
     if ~isequal(isfinite(a), isfinite(b))
         rows{end+1} = sprintf('%-16s %12s %12s %12s   NaN PATTERN DIFFERS', ...
                               name, '-', '-', '-');

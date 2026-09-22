@@ -127,11 +127,9 @@ function HARPIsetup(varargin)
             end
         end
 
-        % Re-assert the correct ordering: DENSEanalysis first, HARP-I last.
-        % DENSEanalysis ships its own incompatible PIXELSTRAIN (and a
-        % PARSEINPUTS); if it wins the search path, demo_2D fails with the
-        % misleading error "Invalid spline data". harpi_paths also reports any
-        % function of ours that is still shadowed.
+        % Re-assert the ordering: DENSEanalysis first, HARP-I last.
+        % DENSEanalysis ships an incompatible PIXELSTRAIN and its own
+        % PARSEINPUTS, which break demo_2D if they win the search path.
         addpath(fullfile(basedir, 'tools'));
         harpi_paths();
     
@@ -144,9 +142,8 @@ function HARPIsetup(varargin)
         savepath([userpath '/pathdef.m']);
         fprintf('Search path saved\n')
      
-        % Ensure the paths are restored every time MATLAB starts.
-        % Append to startup.m rather than overwriting it -- users routinely
-        % keep their own configuration there.
+        % Restore the paths whenever MATLAB starts. Append to startup.m
+        % rather than overwriting it, since it may hold other settings.
         startupfile = fullfile(userpath, 'startup.m');
         marker      = 'addpath(pathdef);';
         existing    = '';

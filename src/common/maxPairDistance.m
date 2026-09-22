@@ -3,9 +3,9 @@ function d = maxPairDistance(A, B)
 %
 %   d = maxPairDistance(A, B)
 %
-%   A is D-by-K, B is D-by-L; returns max over all pairs of ||a - b||.
-%   Pass hull-reduced sets (see EXTREMEPOINTS) to keep this cheap: the result
-%   is identical either way.
+%   A is D-by-K, B is D-by-L. Returns the maximum of ||a - b|| over all
+%   pairs. Pass hull reduced sets, see EXTREMEPOINTS, to keep this cheap.
+%   The result is the same either way.
 %
 %   See also EXTREMEPOINTS.
 

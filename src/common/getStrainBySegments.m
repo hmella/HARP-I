@@ -164,9 +164,7 @@ function [strain] = getStrainBySegments(varargin)
     end
     angles = angles - pi;
 
-    % Work in the rotated frame so that every pixel lands in exactly one bin.
-    % Previously the bin edges were shifted by angle0 while theta was not,
-    % leaving a wedge of width |angle0| unassigned.
+    % Work in the rotated frame, so every pixel lands in exactly one bin.
     theta = mod(theta - angle0 + pi, 2*pi) - pi;
     
     % initialize output
@@ -175,7 +173,7 @@ function [strain] = getStrainBySegments(varargin)
         'segments_CC',   NaN([api.Nseg,Nfr]),...
         'segments_RR',   NaN([api.Nseg,Nfr]));
 
-    % Slice each frame once rather than Nseg times.
+    % Slice each frame once rather than once per segment.
     CCfr = cell(1,Nfr); RRfr = cell(1,Nfr);
     for fr = 1:Nfr
         if ~isempty(api.CC); CCfr{fr} = api.CC(:,:,fr); end
@@ -196,7 +194,7 @@ function [strain] = getStrainBySegments(varargin)
         % segments
         segments(pos) = seg;
 
-        % strain (restricted to the mask; `pos` alone is a full-image wedge)
+        % strain, restricted to the mask
         inseg = pos & api.Mask;
         for fr=1:Nfr
             if ~isempty(api.CC)

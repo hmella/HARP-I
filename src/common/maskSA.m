@@ -62,10 +62,8 @@
 
 function tf = maskSA(X,Y,C)
 
-    % Generic short-axis mask: inside the outermost contour and outside every
-    % inner one. C{1} is the epicardium, C{2..} the inner boundaries. The old
-    % implementation indexed C{1}/C{2} unconditionally and silently dropped
-    % (or errored on) any other number of contours.
+    % Short axis mask: inside the outermost contour and outside every inner
+    % one. C{1} is the epicardium, C{2} onwards the inner boundaries.
     if isempty(C)
         error([mfilename ':noContours'], 'At least one contour is required.');
     end
@@ -79,8 +77,7 @@ function tf = maskSA(X,Y,C)
         on = on | on_k;
     end
 
-    % Points lying exactly on a contour count as wall (matching the original
-    % behaviour), but only where they are inside the outer boundary -- so a
-    % contour drawn outside the epicardium cannot leak pixels into the mask.
+    % Points lying exactly on a contour count as wall, but only inside the
+    % outer boundary.
     tf = tf | (on & outer);
 end

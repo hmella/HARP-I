@@ -1,5 +1,5 @@
 function tests = test_fft_helpers
-%TEST_FFT_HELPERS itok/ktoi must be exact inverses and dimension-correct.
+%TEST_FFT_HELPERS itok and ktoi are inverses and act on the given dims.
     tests = functiontests(localfunctions);
 end
 
@@ -28,8 +28,7 @@ function testMatchesExplicitTransform(t)
 end
 
 function testOddSizesAreHandled(t)
-    % Odd lengths are where a missing dim argument would bite, because
-    % fftshift and ifftshift are not the same permutation there.
+    % At odd lengths fftshift and ifftshift are different permutations.
     rng(5);
     X = randn(5,7,9) + 1i*randn(5,7,9);
     verifyEqual(t, ktoi(itok(X,[1 2 3]),[1 2 3]), X, 'AbsTol', 1e-10);

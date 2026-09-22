@@ -77,9 +77,8 @@ function [dxr,dyr] = TemporalFitting(u,varargin)
     
     % Estimated displacements
     add_zero = false;
-    % Reshape rather than squeeze: squeeze would also collapse a singleton
-    % image dimension (a 1-by-1 ROI, or a single row/column), silently
-    % turning the [rows cols frames] stack into something else.
+    % Reshape rather than squeeze, which would also collapse a singleton
+    % image dimension such as a 1-by-1 ROI or a single row.
     Nt = size(u,4);
     if add_zero
         dx = zeros([Isz Nt+1]); dx(:,:,2:end) = reshape(u(:,:,1,:), [Isz Nt]);
@@ -115,26 +114,20 @@ function [dxr,dyr] = TemporalFitting(u,varargin)
            p.*time(end).^max(0,p-1)];
 
     % ------------------------------------------------------------------
-    % Batched, equality-constrained polynomial fit.
-    %
-    % This used to call lsqlin six times per masked pixel. Two of those
-    % solved a square 4x4 system (an exactly determined problem handed to an
-    % interior-point solver), and the loop-invariant Aeq was rebuilt twice
-    % per pixel. The problem is
+    % Equality constrained polynomial fit, solved for all pixels at once.
     %
     %     min ||A c - f||^2   s.t.   Aeq c = beq
     %
-    % with A = M(~tf,:) and Aeq both independent of the pixel. Solve it by
-    % the null-space method: with Z spanning null(Aeq), any feasible c is
-    % c0 + Z*y, and y falls out of an unconstrained least-squares problem in
-    % the fixed matrix A*Z. Everything that does not depend on the pixel --
-    % Z, pinv(Aeq) and the QR factorisation of A*Z -- is computed once, so
-    % each pixel costs one triangular solve and all pixels go through as a
-    % single matrix of right-hand sides.
+    % A = M(~tf,:) and Aeq are the same for every pixel. With Z spanning
+    % null(Aeq), any feasible c is c0 + Z*y, and y comes from an
+    % unconstrained least squares problem in the fixed matrix A*Z. Z,
+    % pinv(Aeq) and the QR factorisation of A*Z are computed once, so each
+    % pixel costs one triangular solve and all pixels go through as a single
+    % matrix of right hand sides.
     %
-    % The null-space route is used rather than the KKT normal equations
-    % because forming A'A would square the condition number of an already
-    % ill-conditioned order-10 Vandermonde matrix.
+    % The null space route avoids the normal equations, which would square
+    % the condition number of an already poorly conditioned Vandermonde
+    % matrix.
     % ------------------------------------------------------------------
 
     if Nfr < 4
@@ -162,8 +155,7 @@ function [dxr,dyr] = TemporalFitting(u,varargin)
     end
     dAZ = decomposition(AZ, 'qr');
 
-    % The historical code indexed a 3-D mask with two subscripts, which
-    % selects the first frame. Keep that meaning explicitly.
+    % A 3-D mask is reduced to its first frame.
     if ~ismatrix(mask)
         mask = mask(:,:,1);
     end
@@ -207,8 +199,7 @@ function VALS = fit_component(F, A, M, M4a, M4b, time, tf, Z, P, dAZ)
 %FIT_COMPONENT Constrained polynomial fit for every pixel of one component.
 %   F is Nfr x Npix; returns Nfr x Npix of fitted values.
 
-    % End slopes from local cubic fits. These are square systems, so the
-    % backslash gives the exact solution lsqlin was approximating.
+    % End slopes from local cubic fits. These are square systems.
     C4a = M4a \ F(1:4,:);
     C4b = M4b \ F(end-3:end,:);
 
@@ -220,7 +211,7 @@ function VALS = fit_component(F, A, M, M4a, M4b, time, tf, Z, P, dAZ)
     % Constraint values: fix f(0) and both end slopes
     BEQ = [F(1,:); d1; d2];
 
-    C0 = P*BEQ;                       % minimum-norm feasible point
+    C0 = P*BEQ;                       % minimum norm feasible point
     Y  = dAZ \ (F(~tf,:) - A*C0);     % least squares within the null space
     C  = C0 + Z*Y;                    % coefficients, highest power first
 

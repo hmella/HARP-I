@@ -4,21 +4,17 @@ function assertNoUnknownArgs(fname, other_args)
 %   assertNoUnknownArgs(mfilename, other_args)
 %
 %   PARSEINPUTS returns unrecognised parameter/value pairs in its second
-%   output, which every caller in this toolbox used to discard. A misspelled
-%   or renamed parameter therefore did nothing at all and nobody was told --
-%   the cause of several long-lived bugs, e.g. getSegmentation passing
-%   'Contours'/'Resolution' to a getMask that expected 'Contour'/'ContourRes'
-%   (the mask came back empty every time), and 'Frames' being silently
-%   ignored by getStrainBySegments.
+%   output, which the callers in this toolbox used to discard. A misspelled
+%   or renamed parameter then had no effect and no warning was given.
 %
 %   Emits a warning by default. Set the global HARPI_STRICT_ARGS to true to
-%   turn it into an error, which is what the test suite does:
+%   turn it into an error, as the test suite does:
 %
 %       global HARPI_STRICT_ARGS; HARPI_STRICT_ARGS = true;
 %
-%   Note this is deliberately NOT built into parseinputs: that function
-%   shadows an identical copy in DENSEanalysis, whose callers (unwrap2,
-%   imcline, ...) pass extra arguments on purpose.
+%   The check is not built into parseinputs, because that function shadows
+%   an identical copy in DENSEanalysis whose callers pass extra arguments on
+%   purpose.
 %
 %   See also PARSEINPUTS.
 

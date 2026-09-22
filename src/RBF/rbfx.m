@@ -147,9 +147,8 @@ classdef rbfx
 %   - Efficient for small to medium-sized datasets in 2D.
 
     function [r, rx, ry] = distanceMatrix2dNew(xc,yc,x,y)
-        % Every caller in HARP-I wants only r, but rx and ry were always
-        % materialised as well -- three dense M-by-N arrays where one is
-        % needed. Build the components only when they are asked for.
+        % Build the component differences only when they are requested,
+        % since most callers want only r.
         xc = xc(:);   yc = yc(:);
         if nargin==2
             x = xc;   y = yc;
@@ -220,8 +219,7 @@ classdef rbfx
 %   - Efficient for small to medium-sized datasets in 3D.
 
     function [r, rx, ry, rz] = distanceMatrix3dNew(xc,yc,zc,x,y,z)
-        % As for the 2-D version: four dense M-by-N arrays were allocated
-        % when callers only ever read r. In 3-D that dominates peak memory.
+        % As in the 2-D version, build the components only on request.
         xc = xc(:);   yc = yc(:);  zc = zc(:);
         if nargin==3
             x = xc;   y = yc;   z = zc;
@@ -266,9 +264,8 @@ classdef rbfx
         
             % Si eta>0, se suma eta en la diagonal de B => B = B + eta*I
             if eta > 0
-                % Diagonal (MDI) regularization: B = B + eta*I.
-                % N must come from B: f is N-by-C (C = 2 in 2-D, 3 in 3-D),
-                % so length(f) only happens to be right while N > C.
+                % Diagonal regularization: B = B + eta*I. N comes from B,
+                % since f is N-by-C with C the number of components.
                 N = size(B,1);
                 B(1:N+1:end) = B(1:N+1:end) + eta;
             end

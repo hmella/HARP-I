@@ -127,11 +127,6 @@ function [metadata] = HARPI_3D(Ih,varargin)
     %% PHASE UNWRAPPING AND NORMALIZATION
     % Phase unwrapping
     %
-    % NOTE: this used to cache its result in [pwd '/tmp_unwrapped_phase.mat']
-    % and reload it inside a bare try/catch. Because the cache was keyed only
-    % on the file name, processing a second subject from the same working
-    % directory silently reused the first subject's unwrapped phases. The
-    % cache has been removed; use the returned metadata to persist results.
     for i=1:Nfr
             fprintf('\n Unwrapping frame %d of %d',i,Nfr);
             dXpha(:,:,:,i) = unwrap3(dXpha(:,:,:,i),'Mask',dmask(:,:,:,i),'PixelSize',[1 1 1],...
@@ -298,10 +293,8 @@ function [metadata] = HARPI_3D(Ih,varargin)
     
     % Temporal fitting
     %
-    % Not implemented for 3-D: TemporalFitting returns only [dxr, dyr], so
-    % there is no z component to assemble. This used to be a try/catch around
-    % a reference to an undefined `dz`, which reported every failure -- real
-    % ones included -- as "not yet implemented".
+    % Not implemented for 3-D data: TemporalFitting returns only [dxr, dyr],
+    % so there is no z component to assemble.
     u_fitted = [];
     traj_fitted = [];
     if api.TemporalFitting

@@ -176,10 +176,8 @@ function strain = pixelstrain(varargin)
     dX = zeros(2,4);
     tf = false(1,4);
 
-    % Only pixels that pass the mask/neighbour test do any work, and that
-    % test does not depend on the frame. Hoisting it out turns
-    % Ntime*rows*cols iterations (460800 on the 2-D demo, of which ~500
-    % qualify) into Ntime*nnz(...). The arithmetic is untouched.
+    % The mask and neighbour test does not depend on the frame, so evaluate
+    % it once and loop only over the pixels that pass.
     pix = find(mask & Nneighbor > 1).';
 
     for fr = 1:Ntime

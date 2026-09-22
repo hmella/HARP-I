@@ -24,16 +24,13 @@ function testAnnulusAreaAndTopology(t)
 end
 
 function testMaskGridIsOneBased(t)
-    % getMask rasterises on meshgrid(1:cols, 1:rows). A contour hugging the
-    % top-left pixel centre must therefore include pixel (1,1). The GUI used
-    % to draw on a 0-based grid, shifting every mask one pixel.
+    % getMask rasterises on meshgrid(1:cols, 1:rows).
     C = cline({ring(3,3,2.5,16)});
     m = getMask(struct('MaskSize',[8 8],'Contour',C,'ContourRes',0.25));
     verifyTrue(t, m(3,3), 'pixel at the contour centre must be inside');
 end
 
 function testMoreThanTwoContours(t)
-    % maskSA used to index C{1}/C{2} unconditionally.
     C = cline({ring(40,40,20,12), ring(34,40,5,12), ring(46,40,5,12)});
     m = getMask(struct('MaskSize',[80 80],'Contour',C,'ContourRes',0.5));
     verifyFalse(t, m(40,34), 'first inner contour must be excluded');
@@ -42,11 +39,10 @@ function testMoreThanTwoContours(t)
 end
 
 function testWrongParameterNamesRejected(t)
-    % The GUI passed 'Contours'/'Resolution'; parseinputs silently dropped
-    % them and the mask came back empty. It must now fail loudly.
+    % Unrecognised parameter names have to be rejected rather than ignored.
     C = cline({ring(40,40,20,12), ring(40,40,10,12)});
-    % Either rejection is acceptable: with HARPI_STRICT_ARGS set,
-    % assertNoUnknownArgs fires first; otherwise getMask's own validation does.
+    % Either rejection is fine: with HARPI_STRICT_ARGS set
+    % assertNoUnknownArgs fires first, otherwise getMask validates.
     caught = '';
     try
         getMask(struct('MaskSize',[80 80],'Contours',C,'Resolution',0.5));
@@ -58,9 +54,7 @@ function testWrongParameterNamesRejected(t)
 end
 
 function testCornerFlagsAreHonoured(t)
-    % getMask used to hardcode IsCurved=true / IsCorner=false, discarding
-    % whatever the user drew. Marking every point as a corner must yield the
-    % straight-edged polygon, which is strictly smaller than the spline.
+    % Marking every point as a corner gives the straight edged polygon.
     pts = ring(40,40,20,6);
     Csm = cline({pts});                      % default: curved
     Ccn = cline({pts});

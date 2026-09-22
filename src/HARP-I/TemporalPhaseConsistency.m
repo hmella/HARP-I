@@ -49,9 +49,7 @@
 
 function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
 
-    % njumps is the FOURTH positional argument, not the fifth. Guarding on
-    % nargin<5 meant any call that omitted the optional ROI -- including
-    % HARPI's, which asks for 8 -- had its jump budget silently reset to 1.
+    % njumps is the fourth positional argument and ROI the fifth.
     if nargin < 4 || isempty(njumps)
         njumps = 1;
     end
@@ -76,11 +74,9 @@ function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
     % Maximum value on reference phase
     ref_pha_max = max(ref_pha,[],2);
 
-    % Largest distance within the reference point set.
-    %
-    % Only the maximum of the distance matrix is ever used, and the maximum
-    % is attained at convex-hull vertices, so there is no need to build the
-    % full N-by-N matrix (see extremePoints). The value is identical.
+    % Largest distance within the reference point set. Only the maximum of
+    % the distance matrix is used, and it is reached at a convex hull
+    % vertex, so the full N-by-N matrix is not needed (see extremePoints).
     ref_hull  = extremePoints(ref_pha(:,tf_ref));
     r_ref_max = maxPairDistance(ref_hull, ref_hull);
 
@@ -105,11 +101,9 @@ function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
             jump_x = 0;
             jump_y = 0;
 
-            % A candidate jump only translates this frame's point set, so its
-            % hull is the hull of the unshifted set translated by the same
-            % amount. Reduce once per frame instead of rebuilding a dense
-            % M-by-N distance matrix for each of the (2*njumps+2)^2
-            % candidates.
+            % A candidate jump only translates this frame's point set, so
+            % the hull is computed once per frame rather than once per
+            % candidate.
             pha_hull = extremePoints(pha(:,tf));
 
             for jx=1:numel(jumps_x)

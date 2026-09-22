@@ -65,18 +65,11 @@ function [Xphas, Yphas] = RefPhaseSmoothing(Xpha,Ypha,method,a,eta)
     % Get radial basis functions
     phi = feval(method);
 
-    % Smooth phase using RBF interpolation.
-    %
-    % Centres and evaluation points are the same pixels, so this is a
-    % self-interpolation: going through RBFInterp2D built the N-by-N distance
-    % matrix twice (r and re are equal) and evaluated the kernel twice
-    % (B and Psi are equal), i.e. four identical dense N-by-N arrays where
-    % one suffices. Written out, the whole thing is
+    % Smooth phase using RBF interpolation. The centres and the evaluation
+    % points are the same pixels, so one kernel matrix is enough:
     %
     %     Xphas = B * ((B + eta*I) \ Xpha)
     %
-    % which is bitwise identical because B and Psi were computed by the same
-    % code on the same inputs.
     tf = ~isnan(Xpha) & ~isnan(Ypha);
 
     r = rbfx.distanceMatrix2dNew([X(tf)]', [Y(tf)]');

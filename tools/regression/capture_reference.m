@@ -5,10 +5,9 @@ function out = capture_reference(varargin)
 %   capture_reference('Output', '/path/ref.mat', 'Data', '/path/data_2D.mat')
 %   out = capture_reference(...)
 %
-%   Runs the demo_2D pipeline with plotting disabled and saves every stage
-%   boundary -- not just the final result -- so that a later difference can be
-%   attributed to one specific change. The same file is consumed by the Python
-%   port's test suite, hence the -v7.3 format (readable by h5py).
+%   Runs the demo_2D pipeline with plotting disabled and saves the output of
+%   every stage, so a later difference can be traced to one change. The same
+%   file is read by the Python test suite, hence the -v7.3 format.
 %
 %   Always run single-threaded for reproducibility:
 %       matlab -batch "maxNumCompThreads(1); capture_reference"
@@ -67,9 +66,7 @@ function out = capture_reference(varargin)
     end
 
     %% ---- stage 4: temporal phase consistency ----------------------------
-    % Captured at BOTH jump budgets: njumps=1 is what HARPI effectively uses
-    % today (the nargin off-by-one silently clamps it), njumps=8 is the
-    % intended behaviour. Keeping both makes that fix verifiable.
+    % Captured at both jump budgets so either can be compared.
     phase_jumps_n1 = TemporalPhaseConsistency(uXpha, uYpha, 1, 1, []);
     phase_jumps_n8 = TemporalPhaseConsistency(uXpha, uYpha, 1, 8, [1 Isz(1) 1 Isz(2)]);
 

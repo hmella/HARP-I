@@ -234,12 +234,8 @@ classdef HARPFilter
 
         % Filter image
         function Ih = filter(obj,I)
-            % Implicit expansion over the frame dimension: replicating the
-            % filter with repmat allocated a full [rows cols enc frames]
-            % copy for nothing. It also used obj.image_size(end), the frame
-            % count of the image passed to the CONSTRUCTOR, so filtering a
-            % stack with a different number of frames silently mis-sized the
-            % filter; broadcasting removes that failure mode entirely.
+            % Implicit expansion over the frame dimension, so the filter
+            % does not have to be replicated across frames.
             if ~isequal(size(I,[1 2]), size(obj.kspace_filter,[1 2]))
                 error([class(obj) ':sizeMismatch'], ...
                     'Image is %s but this filter was built for %s.', ...

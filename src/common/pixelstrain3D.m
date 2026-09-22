@@ -197,9 +197,8 @@ function strain = pixelstrain3D(varargin)
     dX = zeros(3,6);
     tf = false(1,6);
 
-    % The mask/neighbour test is frame-independent, so evaluate it once.
-    % For a 112^3 volume over 22 frames this replaces ~31 million iterations
-    % per frame with the ~100 thousand voxels that actually qualify.
+    % The mask and neighbour test does not depend on the frame, so evaluate
+    % it once and loop only over the voxels that pass.
     vox = find(mask & (Nneighbor_SA > 1 | Nneighbor_LA > 1)).';
 
     for fr = 1:Ntime

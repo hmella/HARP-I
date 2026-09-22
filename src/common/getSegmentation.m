@@ -116,7 +116,7 @@ function getSegmentation_OpeningFcn(hObject, eventdata, handles, varargin)
               end
           end
       catch err
-          % Leave the GUI in a usable (empty) state rather than half-loaded.
+          % Leave the GUI empty rather than half loaded.
           handles.contours           = cell([1 handles.Nfr]);
           handles.contours_positions = cell([1 handles.Nfr]);
           handles.contours_isclosed  = cell([1 handles.Nfr]);

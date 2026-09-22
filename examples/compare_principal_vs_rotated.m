@@ -1,12 +1,10 @@
 % COMPARE_PRINCIPAL_VS_ROTATED
 %
-% demo_2D.m historically assigned the principal strains (st.p1, st.p2) to
-% variables named RR and CC, while strain_curves2D.m reads the genuine
-% rotated components (st.RR, st.CC) from the same saved file. The two are
-% different quantities. This script quantifies the difference so the choice
-% of what to display is made on evidence rather than by accident.
+% The principal strains (st.p1, st.p2) and the rotated components
+% (st.RR, st.CC) are different quantities. This script compares them so the
+% choice of what to plot can be made on the data.
 %
-% Run demo_2D.m first (it writes motion2D_HARPI.mat).
+% Run demo_2D.m first, which writes motion2D_HARPI.mat.
 
 clear; clc; close all
 

@@ -1,5 +1,5 @@
 function tests = test_maxPairDistance
-%TEST_MAXPAIRDISTANCE Hull-reduced max distance must equal brute force exactly.
+%TEST_MAXPAIRDISTANCE Hull reduced max distance equals brute force.
     tests = functiontests(localfunctions);
 end
 
@@ -16,16 +16,14 @@ function testMatchesBruteForce2D(t)
         A = randn(2,n)*randi(10); B = randn(2,m)*randi(10);
         exact = brute2(A,B);
         fast  = maxPairDistance(extremePoints(A), extremePoints(B));
-        % must be bitwise equal: the same pair of points, subtracted in the
-        % same order, fed through the same expression
         verifyEqual(t, fast, exact, ...
             sprintf('trial %d (n=%d m=%d)', trial, n, m));
     end
 end
 
 function testHandlesCollinearAndDuplicate(t)
-    A = [1 2 3 4; 1 2 3 4];        % perfectly collinear -> convhull errors
-    B = [0 0 0; 5 5 5];            % all duplicates
+    A = [1 2 3 4; 1 2 3 4];        % collinear, so no hull exists
+    B = [0 0 0; 5 5 5];            % duplicates
     verifyEqual(t, maxPairDistance(extremePoints(A), extremePoints(B)), ...
                    brute2(A,B));
 end

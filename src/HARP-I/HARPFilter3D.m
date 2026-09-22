@@ -114,10 +114,8 @@ classdef HARPFilter3D
 
         % Filter image
         function Ih = filter(obj,I)
-            % Implicit expansion over the frame dimension. The repmat
-            % materialised an [Nx Ny Nz 3 Nfr] copy of the filter purely to
-            % multiply elementwise -- for a 112^3 x 3 x 22 volume that is
-            % about 0.7 GB of avoidable allocation.
+            % Implicit expansion over the frame dimension, so the filter
+            % does not have to be replicated across frames.
             if ~isequal(size(I,[1 2 3]), size(obj.kspace_filter,[1 2 3]))
                 error([class(obj) ':sizeMismatch'], ...
                     'Volume is %s but this filter was built for %s.', ...

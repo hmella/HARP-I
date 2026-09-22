@@ -1,5 +1,5 @@
 function tests = test_TemporalFitting
-%TEST_TEMPORALFITTING Constraints, optimality and exactness of the batched fit.
+%TEST_TEMPORALFITTING Constraints and optimality of the polynomial fit.
     tests = functiontests(localfunctions);
 end
 
@@ -20,8 +20,7 @@ function [u, mask, Nfr] = toy(~)
 end
 
 function testReproducesAPolynomialExactly(t)
-    % A trajectory that IS a degree-5 polynomial (with u(0)=0) must be
-    % recovered to machine precision by a degree-10 fit.
+    % A degree 5 trajectory with u(0)=0, recovered by a degree 10 fit.
     Nfr = 18; tt = linspace(0,1,Nfr);
     c = [0.3 -1.1 0.7 0.2 -0.4 0];           % highest power first, c(end)=0
     poly = polyval(c, tt);
@@ -30,9 +29,8 @@ function testReproducesAPolynomialExactly(t)
     u(1,1,2,:) = -poly;
     [dx, dy] = TemporalFitting(u, struct('Mask',true(1,1),'Frames',1:Nfr, ...
                                          'TemporalOrder',10,'Show',false));
-    % Tolerance is set by the conditioning of the degree-10 monomial
-    % Vandermonde (cond ~ 6e7), not by the solver: recovery is exact in
-    % exact arithmetic. 1e-4 px is far below any meaningful displacement.
+    % The tolerance is set by the conditioning of the monomial basis, not
+    % by the solver.
     verifyEqual(t, squeeze(dx(1,1,:))', poly,  'AbsTol', 1e-4);
     verifyEqual(t, squeeze(dy(1,1,:))', -poly, 'AbsTol', 1e-4);
 end
@@ -46,7 +44,7 @@ function testHonoursTheEqualityConstraints(t)
 end
 
 function testBeatsOrMatchesLsqlinResidual(t)
-    % The fit must be a genuine minimiser: no worse than what lsqlin found.
+    % The fit has to be a minimiser, so no worse than lsqlin.
     if isempty(ver('optim'))
         assumeFail(t, 'Optimization Toolbox not available');
     end
@@ -73,7 +71,7 @@ function testBeatsOrMatchesLsqlinResidual(t)
             if r_ours > r_lsqlin*(1+1e-6); worse = worse + 1; end
         end
     end
-    verifyEqual(t, worse, 0, 'the batched fit must never be worse than lsqlin');
+    verifyEqual(t, worse, 0, 'the fit should never be worse than lsqlin');
 end
 
 function testRejectsTooFewFrames(t)
@@ -91,8 +89,7 @@ function testRejectsOrderAboveFrameCount(t)
 end
 
 function testAcceptsThreeDimensionalMask(t)
-    % HARPI passes a [rows cols frames] mask; the historical two-subscript
-    % indexing meant frame 1 was used. That must keep working.
+    % HARPI passes a [rows cols frames] mask, of which frame 1 is used.
     [u, mask, Nfr] = toy();
     m3 = repmat(mask, [1 1 Nfr]);
     [dx2, ~] = TemporalFitting(u, struct('Mask',mask,'Frames',1:Nfr,'TemporalOrder',10,'Show',false));

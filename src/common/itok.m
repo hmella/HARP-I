@@ -52,9 +52,7 @@ if nargin < 2
   Data = fftshift(fftn(ifftshift(Data)));
 else
   % Shift only the dimension being transformed. Without the dim argument
-  % fftshift/ifftshift rotate EVERY dimension on every pass; the pairs cancel
-  % on the untransformed axes, so the result was correct, but for Dims=[1 2 3]
-  % it cost six full-array circshifts instead of two.
+  % fftshift and ifftshift rotate every dimension on each pass.
   for d = 1:numel(Dims)
     Data = fftshift(fft(ifftshift(Data,Dims(d)),[],Dims(d)),Dims(d));
   end

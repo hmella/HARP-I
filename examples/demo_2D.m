@@ -76,16 +76,13 @@ options = struct(...
     'Orientation', []);
 st = pixelstrain(options);
 
-% NOTE on which strain is which.
+% Which strain is which:
 %   st.RR / st.CC  radial and circumferential components of the Lagrangian
-%                  strain tensor -- the quantities reported in the paper and
-%                  the ones strain_curves2D.m plots.
-%   st.p1 / st.p2  1st and 2nd principal strains (eigenvalues of E).
-% This script used to assign st.p1/st.p2 to variables *named* RR/CC, so the
-% animation below and strain_curves2D.m showed different quantities under the
-% same labels. Both are now computed under their own names; the committed
-% GIFs were produced with 'p2', which stays the default for reproducibility.
-STRAIN_FOR_DISPLAY = 'p2';   % 'CC' = circumferential (paper) | 'p2' = 2nd principal
+%                  strain tensor, as reported in the paper and plotted by
+%                  strain_curves2D.m
+%   st.p1 / st.p2  1st and 2nd principal strains, the eigenvalues of E
+% All four are computed below. The switch selects what the animation shows.
+STRAIN_FOR_DISPLAY = 'p2';   % 'CC' circumferential (paper) | 'p2' 2nd principal
 
 expand = @(v) reshape_masked(v, st.maskimage, Isz, Nfr);
 RR = expand(st.RR);   % radial (Lagrangian)

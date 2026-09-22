@@ -5,14 +5,13 @@ function info = harpi_paths(varargin)
 %   harpi_paths('DENSEanalysis', '/path/to/denseanalysis')
 %   info = harpi_paths(...)
 %
-%   Adds DENSEanalysis FIRST and HARP-I's src/ LAST, so that HARP-I's own
-%   functions always take precedence. This ordering matters: DENSEanalysis
-%   ships its own, incompatible PIXELSTRAIN, and if it wins the search path
-%   demo_2D.m fails with the misleading message "Invalid spline data".
-%   DENSEanalysis also ships PARSEINPUTS.
+%   Adds DENSEanalysis first and HARP-I's src/ last, so HARP-I's own
+%   functions take precedence. DENSEanalysis ships an incompatible
+%   PIXELSTRAIN and its own PARSEINPUTS; if those win the search path,
+%   demo_2D.m fails with "Invalid spline data".
 %
-%   A report of any remaining shadowed function names is printed, and
-%   returned in INFO.collisions when an output is requested.
+%   Any remaining shadowed function names are printed, and returned in
+%   INFO.collisions when an output is requested.
 %
 %   See also HARPIsetup.
 
@@ -85,8 +84,8 @@ end
 function collisions = check_collisions(root, verbose)
 % Report HARP-I functions that are shadowed by another copy on the path.
 %
-% Builds a single name -> files map from every directory on the path, which is
-% far cheaper than calling WHICH('-all') once per function.
+% Builds one name -> files map from every directory on the path, which is much
+% faster than calling WHICH('-all') per function.
 
     srcdir = fullfile(root, 'src');
 
