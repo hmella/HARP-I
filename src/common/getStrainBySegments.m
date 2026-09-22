@@ -79,20 +79,42 @@ function [strain] = getStrainBySegments(varargin)
             'Nseg',             6,...
             'ClockWise',        false,...
             'PositionA',        [],...
-            'PositionB',        []);
+            'PositionB',        [],...
+            'Frames',           [],...
+            'OutlierThreshold', 0.5);
 
     % Check input
-    api = parseinputs(defapi, [], varargin{:});
+    [api, extra_args] = parseinputs(defapi, [], varargin{:});
+    assertNoUnknownArgs(mfilename, extra_args);
+
+    errid = sprintf('%s:invalidInput', mfilename);
 
     % image size
     Isz = size(api.Mask);
 
-    % number of frames
-    Nfr = size(api.CC,3);
+    % number of frames (CC may be omitted when only RR is wanted)
+    if ~isempty(api.CC)
+        Nfr = size(api.CC,3);
+    elseif ~isempty(api.RR)
+        Nfr = size(api.RR,3);
+    else
+        error(errid, 'At least one of CC or RR must be supplied.');
+    end
+    if ~isempty(api.Frames)
+        if ~isempty(api.CC); api.CC = api.CC(:,:,api.Frames); end
+        if ~isempty(api.RR); api.RR = api.RR(:,:,api.Frames); end
+        Nfr = numel(api.Frames);
+    end
 
     % parse coordinates
-    if or(isempty(api.X),isempty(api.Y))
-        [X,Y] = meshgrid(1:Isz(1),1:Isz(2));
+    if isempty(api.X) || isempty(api.Y)
+        [X,Y] = meshgrid(1:Isz(2),1:Isz(1));
+    else
+        X = api.X;
+        Y = api.Y;
+    end
+    if ~isequal(size(X), Isz) || ~isequal(size(Y), Isz)
+        error(errid, 'X and Y must be the same size as Mask (%s).', mat2str(Isz));
     end
 
     % parse origin
@@ -128,7 +150,7 @@ function [strain] = getStrainBySegments(varargin)
     end
 
     if isempty(api.PositionB)
-        api.PositionB = origin(1);
+        api.PositionB = origin(2);   % y of the primary spoke -> angle0 == 0
     end
 
     % primary spoke angle
@@ -140,7 +162,12 @@ function [strain] = getStrainBySegments(varargin)
     else
         angles = linspace(2*pi,0,api.Nseg+1);
     end
-    angles = angles + angle0 - pi;
+    angles = angles - pi;
+
+    % Work in the rotated frame so that every pixel lands in exactly one bin.
+    % Previously the bin edges were shifted by angle0 while theta was not,
+    % leaving a wedge of width |angle0| unassigned.
+    theta = mod(theta - angle0 + pi, 2*pi) - pi;
     
     % initialize output
     strain = struct(...
@@ -162,15 +189,18 @@ function [strain] = getStrainBySegments(varargin)
         % segments
         segments(pos) = seg;
 
-        % strain
+        % strain (restricted to the mask; `pos` alone is a full-image wedge)
+        inseg = pos & api.Mask;
         for fr=1:Nfr
             if ~isempty(api.CC)
                 CCfr = api.CC(:,:,fr);
-                strain.segments_CC(seg,fr) = mean(CCfr(and(~(CCfr>0.5),pos)),'omitnan');
+                sel  = inseg & ~(CCfr > api.OutlierThreshold);
+                strain.segments_CC(seg,fr) = mean(CCfr(sel),'omitnan');
             end
             if ~isempty(api.RR)
                 RRfr = api.RR(:,:,fr);
-                strain.segments_RR(seg,fr) = mean(RRfr(and(~(RRfr>0.5),pos)),'omitnan');
+                sel  = inseg & ~(RRfr > api.OutlierThreshold);
+                strain.segments_RR(seg,fr) = mean(RRfr(sel),'omitnan');
             end
         end
 

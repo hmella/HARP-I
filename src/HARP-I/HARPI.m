@@ -15,8 +15,6 @@
 %   Ih          - Input image sequence (4D array, size: [rows, cols, channels, frames]).
 %   varargin    - Optional parameters specified as name-value pairs:
 %       'Mask'              - Binary mask (default: true(size(Ih))).
-%       'FOV'               - Field of view (default: []).
-%       'PixelSize'         - Pixel size (default: []).
 %       'Frames'            - Frames to be analyzed (default: all frames).
 %       'Show'              - Flag to display intermediate results (default: false).
 %       'Method'            - Interpolation method (default: 'ThinPlate').
@@ -26,7 +24,6 @@
 %       'Seed'              - Unwrapping seed (default: 'auto').
 %       'Connectivity'      - Connectivity for unwrapping (default: 4).
 %       'RefPhaseSmoothing' - Flag for reference phase smoothing (default: false).
-%       'ROI'               - Region of interest (default: [1, rows, 1, cols]).
 %       'TemporalFitting'   - Flag for temporal fitting (default: false).
 %       'TemporalFittingOrder' - Temporal fitting order (default: 10).
 %       'DownsamplingFac'   - Downsampling factor (default: 1).
@@ -83,9 +80,7 @@ function [metadata] = HARPI(Ih,varargin)
     %% PARSE INPUT
     % Default arguments
     defapi = struct(...
-            'Mask',              true(size(Ih)),...
-            'FOV',               [],...
-            'PixelSize',         [],...
+            'Mask',              true([size(Ih,1) size(Ih,2) size(Ih,4)]),...
             'Frames',            [],...
             'Show',              false,...
             'Method',            'ThinPlate',...
@@ -95,13 +90,13 @@ function [metadata] = HARPI(Ih,varargin)
             'UnwrappingSeed',    'auto',...
             'Connectivity',      4,...
             'RefPhaseSmoothing', false,...
-            'ROI',               [1 size(Ih,1) 1 size(Ih,2)],...
             'TemporalFitting',   false,...
             'TemporalFittingOrder', 10,...
             'DownsamplingFac',      1);
   
     % Check input
-    api = parseinputs(defapi, [], varargin{:});
+    [api, extra_args] = parseinputs(defapi, [], varargin{:});
+    assertNoUnknownArgs(mfilename, extra_args);
   
     % Image size
     Isz = size(Ih(:,:,1,1));
@@ -196,18 +191,8 @@ function [metadata] = HARPI(Ih,varargin)
     phi = feval(method);
     a = api.a_constant;
   
-    % TODO: add documentation for this part of the code
-    if numel(a) > 1
-        if strcmp(api.RBFFacDist,'DecreasingLinear')
-            a = max(a) - (max(a)-min(a))*linspace(0,1,Nfr);
-        elseif strcmp(api.RBFFacDist,'Linear')
-            a = max(a) + (max(a)-min(a))*linspace(0,1,Nfr);
-        elseif strcmp(api.RBFFacDist,'Quadratic')
-            a = min(a) + abs(power(max(a)-min(a),0.4)*linspace(-1,1,Nfr)).^2.5;
-        end
-    else
-        a = api.a_constant*ones([1 Nfr]);
-    end
+    % Per-frame shape parameter (see rbfShapeSchedule).
+    a = rbfShapeSchedule(a, api.RBFFacDist, Nfr);
   
     % Grids
     [dX, dY] = meshgrid(1:dfac:Isz(2),1:dfac:Isz(1));
@@ -232,13 +217,13 @@ function [metadata] = HARPI(Ih,varargin)
     % Temporal phase consistency
     ref    = 1;
     njumps = 8;
-    phase_jumps = TemporalPhaseConsistency(dXpha,dYpha,ref,njumps,api.ROI);
+    phase_jumps = TemporalPhaseConsistency(dXpha,dYpha,ref,njumps,[]);
     dXpha = dXpha + reshape(phase_jumps(1,:),[1 1 numel(phase_jumps(1,:))]);
     dYpha = dYpha + reshape(phase_jumps(2,:),[1 1 numel(phase_jumps(2,:))]);
   
     % Reference phase
     if api.RefPhaseSmoothing
-        smooth_f = a(i)/5; % This parameter was chosen empirically
+        smooth_f = a(1)/5; % This parameter was chosen empirically
         [Xphar,Yphar] = RefPhaseSmoothing(Xphar,Yphar,method,smooth_f,eta);    
         Pha_ref = [flatten(Xphar),flatten(Yphar)]';
     end

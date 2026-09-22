@@ -14,7 +14,7 @@
 %   u              - Displacement field (size: [rows, cols, components, frames]).
 %                    `u(:,:,1,:)` represents x-displacements.
 %                    `u(:,:,2,:)` represents y-displacements.
-%   Mask           - (Optional) Binary mask defining active pixels to fit. Default: true(size(u)).
+%   Mask           - (Optional) Binary mask defining active pixels to fit. Default: true(rows, cols).
 %   Frames         - (Optional) Indices of frames to resample. Default: [] (all frames).
 %   TemporalOrder  - (Optional) Temporal order of the polynomial fit. Default: 10.
 %   Show           - (Optional) Boolean flag to visualize the results. Default: false.
@@ -53,16 +53,17 @@
 function [dxr,dyr] = TemporalFitting(u,varargin)
 
     defapi = struct(...
-        'Mask',             true(size(u)),...
+        'Mask',             true([size(u,1) size(u,2)]),...
         'Frames',           [],...
         'TemporalOrder',    10,...
         'Show',             false);
 
     % parse inputs
-    api = parseinputs(defapi,[],varargin{:});    
+    [api, extra_args] = parseinputs(defapi,[],varargin{:});
+    assertNoUnknownArgs(mfilename, extra_args);    
     
     % Mask
-    mask = api.Mask;
+    mask = logical(api.Mask);
     
     % Number of frames and frames to be resampled
     fr = api.Frames;
