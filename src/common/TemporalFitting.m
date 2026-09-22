@@ -77,12 +77,16 @@ function [dxr,dyr] = TemporalFitting(u,varargin)
     
     % Estimated displacements
     add_zero = false;
+    % Reshape rather than squeeze: squeeze would also collapse a singleton
+    % image dimension (a 1-by-1 ROI, or a single row/column), silently
+    % turning the [rows cols frames] stack into something else.
+    Nt = size(u,4);
     if add_zero
-        dx = zeros([Isz Nfr+1]); dx(:,:,2:end) = squeeze(u(:,:,1,:));
-        dy = zeros([Isz Nfr+1]); dy(:,:,2:end) = squeeze(u(:,:,2,:));
+        dx = zeros([Isz Nt+1]); dx(:,:,2:end) = reshape(u(:,:,1,:), [Isz Nt]);
+        dy = zeros([Isz Nt+1]); dy(:,:,2:end) = reshape(u(:,:,2,:), [Isz Nt]);
     else
-        dx = squeeze(u(:,:,1,:));
-        dy = squeeze(u(:,:,2,:));
+        dx = reshape(u(:,:,1,:), [Isz Nt]);
+        dy = reshape(u(:,:,2,:), [Isz Nt]);
     end
 
     % Resampled displacements
@@ -105,47 +109,79 @@ function [dxr,dyr] = TemporalFitting(u,varargin)
     M  = bsxfun(@power,time(:),p);
     M4 = bsxfun(@power,time(:),3:-1:0);
 
-    % Equality constraints
-    Aeq_fun = @(T,p) [T(1).^p;
-                      p.*T(1).^max(0,p-1);
-                      p.*T(end).^max(0,p-1)];
-    Beq_fun = @(f,d1,d2) [f(1);
-                          d1;
-                          d2];
-    % Polynomial fitting
-    opt = optimoptions('lsqlin','Algorithm','interior-point','Display','off');
-    for i=1:Isz(1)
-        for j=1:Isz(2)
-            if mask(i,j)
-                % Fitting xtraj
-                f = squeeze(dx(i,j,tmp));
-                d1 = polyval(polyder(lsqlin(M4(1:4,:),f(1:4),[],[],[],[],[],[],[],opt)),time(1));
-                d2 = polyval(polyder(lsqlin(M4(end-3:end,:),f(end-3:end),[],[],[],[],[],[],[],opt)),time(end));
-                Aeq = Aeq_fun(time,p);
-                Beq = Beq_fun(f,d1,d2);
-                coef = lsqlin(M(~tf,:),f(~tf),[],[],Aeq,Beq,[],[],[],opt);
-                if add_zero
-                    dxr(i,j,:) = polyval(coef,time(2:end));
-                else
-                    dxr(i,j,:) = polyval(coef,time);
-                end
+    % Equality constraints: value at t=0 and slope at both ends.
+    Aeq = [time(1).^p;
+           p.*time(1).^max(0,p-1);
+           p.*time(end).^max(0,p-1)];
 
-                % Fitting ytraj
-                f = squeeze(dy(i,j,tmp));
-                d1 = polyval(polyder(lsqlin(M4(1:4,:),f(1:4),[],[],[],[],[],[],[],opt)),time(1));
-                d2 = polyval(polyder(lsqlin(M4(end-3:end,:),f(end-3:end),[],[],[],[],[],[],[],opt)),time(end));
-                Aeq = Aeq_fun(time,p);
-                Beq = Beq_fun(f,d1,d2);
-                coef = lsqlin(M(~tf,:),f(~tf),[],[],Aeq,Beq,[],[],[],opt);
-                if add_zero
-                    dyr(i,j,:) = polyval(coef,time(2:end));
-                else
-                    dyr(i,j,:) = polyval(coef,time);
-                end
-            end
-        end
+    % ------------------------------------------------------------------
+    % Batched, equality-constrained polynomial fit.
+    %
+    % This used to call lsqlin six times per masked pixel. Two of those
+    % solved a square 4x4 system (an exactly determined problem handed to an
+    % interior-point solver), and the loop-invariant Aeq was rebuilt twice
+    % per pixel. The problem is
+    %
+    %     min ||A c - f||^2   s.t.   Aeq c = beq
+    %
+    % with A = M(~tf,:) and Aeq both independent of the pixel. Solve it by
+    % the null-space method: with Z spanning null(Aeq), any feasible c is
+    % c0 + Z*y, and y falls out of an unconstrained least-squares problem in
+    % the fixed matrix A*Z. Everything that does not depend on the pixel --
+    % Z, pinv(Aeq) and the QR factorisation of A*Z -- is computed once, so
+    % each pixel costs one triangular solve and all pixels go through as a
+    % single matrix of right-hand sides.
+    %
+    % The null-space route is used rather than the KKT normal equations
+    % because forming A'A would square the condition number of an already
+    % ill-conditioned order-10 Vandermonde matrix.
+    % ------------------------------------------------------------------
+
+    if Nfr < 4
+        error([mfilename ':tooFewFrames'], ...
+            'Temporal fitting needs at least 4 frames; got %d.', Nfr);
+    end
+    if api.TemporalOrder + 1 > Nfr
+        error([mfilename ':orderTooHigh'], ...
+            'TemporalOrder %d needs at least %d frames; got %d.', ...
+            api.TemporalOrder, api.TemporalOrder+1, Nfr);
     end
 
+    A  = M(~tf,:);
+    Z  = null(Aeq);            % nc x (nc-3), constant
+    P  = pinv(Aeq);            % nc x 3,      constant
+    AZ = A*Z;
+
+    if ~isempty(AZ)
+        c = cond(AZ);
+        if ~isfinite(c) || c > 1e12
+            warning([mfilename ':illConditioned'], ...
+                ['Temporal fit is ill-conditioned (cond = %.2e); consider a ' ...
+                 'TemporalOrder below %d for %d frames.'], c, api.TemporalOrder, Nfr);
+        end
+    end
+    dAZ = decomposition(AZ, 'qr');
+
+    % The historical code indexed a 3-D mask with two subscripts, which
+    % selects the first frame. Keep that meaning explicitly.
+    if ~ismatrix(mask)
+        mask = mask(:,:,1);
+    end
+
+    idx = find(mask);
+    if ~isempty(idx)
+        FX = reshape(dx, prod(Isz), []);  FX = FX(idx, tmp).';   % Nfr x Npix
+        FY = reshape(dy, prod(Isz), []);  FY = FY(idx, tmp).';
+
+        M4a = M4(1:4,:);
+        M4b = M4(end-3:end,:);
+
+        DXR = fit_component(FX, A, M, M4a, M4b, time, tf, Z, P, dAZ);
+        DYR = fit_component(FY, A, M, M4a, M4b, time, tf, Z, P, dAZ);
+
+        dxr = scatter_back(DXR, idx, Isz, Nfr);
+        dyr = scatter_back(DYR, idx, Isz, Nfr);
+    end
 
     % PLots
     if api.Show
@@ -164,4 +200,38 @@ function [dxr,dyr] = TemporalFitting(u,varargin)
         pause
     end
 
+end
+
+% =========================================================================
+function VALS = fit_component(F, A, M, M4a, M4b, time, tf, Z, P, dAZ)
+%FIT_COMPONENT Constrained polynomial fit for every pixel of one component.
+%   F is Nfr x Npix; returns Nfr x Npix of fitted values.
+
+    % End slopes from local cubic fits. These are square systems, so the
+    % backslash gives the exact solution lsqlin was approximating.
+    C4a = M4a \ F(1:4,:);
+    C4b = M4b \ F(end-3:end,:);
+
+    t1 = time(1);
+    t2 = time(end);
+    d1 = 3*C4a(1,:)*t1^2 + 2*C4a(2,:)*t1 + C4a(3,:);
+    d2 = 3*C4b(1,:)*t2^2 + 2*C4b(2,:)*t2 + C4b(3,:);
+
+    % Constraint values: fix f(0) and both end slopes
+    BEQ = [F(1,:); d1; d2];
+
+    C0 = P*BEQ;                       % minimum-norm feasible point
+    Y  = dAZ \ (F(~tf,:) - A*C0);     % least squares within the null space
+    C  = C0 + Z*Y;                    % coefficients, highest power first
+
+    VALS = M*C;                       % == polyval(c, time) for every column
+end
+
+% =========================================================================
+function out = scatter_back(VALS, idx, Isz, Nfr)
+%SCATTER_BACK Place per-pixel time courses back on the image grid.
+    out  = NaN([Isz Nfr]);
+    flat = reshape(out, [], Nfr);
+    flat(idx,:) = VALS.';
+    out  = reshape(flat, [Isz Nfr]);
 end
