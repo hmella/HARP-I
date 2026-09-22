@@ -75,7 +75,8 @@ function strain = pixelstrain(varargin)
         'dy',               [],...
         'Origin',           [],...
         'Orientation',      []);
-    api = parseinputs(defapi,[],varargin{:});
+    [api, extra_args] = parseinputs(defapi,[],varargin{:});
+    assertNoUnknownArgs(mfilename, extra_args);
     
     % check X/Y/mask
     X = api.X;

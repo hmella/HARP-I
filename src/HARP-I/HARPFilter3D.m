@@ -15,8 +15,6 @@
 %   - wave_vec: Wave vectors representing spatial frequencies of interest.
 %   - sinmod: Boolean flag to enable/disable SinMod processing (default: false).
 %   - type: Type of filter ('Butterworth').
-%   - lambda: Wavelength parameter for Gabor filter (reserved for future use).
-%   - cutoff: Cutoff frequency for the Butterworth filter.
 %   - order: Order of the Butterworth filter.
 %   - kspace_filter: Generated k-space filters for the input data.
 %   - wave_vectors: Wave vectors used to define central frequencies.
@@ -65,8 +63,6 @@ classdef HARPFilter3D
         wave_vec
         sinmod
         type
-        lambda
-        cutoff
         order
         kspace_filter
         wave_vectors
@@ -81,16 +77,15 @@ classdef HARPFilter3D
             % Default inputs for the contstructor
             defapi = struct('Image',[],'WaveVec',[0 0 0],'SinMod',false,...
                             'FilterType','Butterworth',...
-                            'Gabor_lambda',2,'Butterworth_cuttoff',25,'Butterworth_order',7);
+                            'Butterworth_order',7);
 
             % Parse inputs
-            api = parseinputs(defapi,[],varargin{:});
+            [api, extra_args] = parseinputs(defapi,[],varargin{:});
+            assertNoUnknownArgs(mfilename, extra_args);
             obj.image_size = size(api.Image,[1 2 3]);
             obj.wave_vectors = api.WaveVec;
             obj.sinmod = api.SinMod;
             obj.type = api.FilterType;
-            obj.lambda = api.Gabor_lambda;
-            obj.cutoff = api.Butterworth_cuttoff;
             obj.order = api.Butterworth_order;
                        
             % % Wave vectors

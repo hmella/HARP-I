@@ -85,7 +85,8 @@ classdef HARPFilter
                             'Gabor_lambda',2,'Butterworth_cuttoff',25,'Butterworth_order',7);
 
             % Parse inputs
-            api = parseinputs(defapi,[],varargin{:});
+            [api, extra_args] = parseinputs(defapi,[],varargin{:});
+            assertNoUnknownArgs(mfilename, extra_args);
             obj.image_size = size(api.Image);
             obj.direction = api.Direction;
             obj.central_freq = api.CentralFreq;
