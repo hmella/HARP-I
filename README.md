@@ -40,11 +40,26 @@ To install **HARP-I**, follow these steps:
    HARPIsetup
    ```
 
-### Graphical Installation Demonstration
+### Important: search-path order
 
-For users who prefer a graphical interface instead of using the terminal, a step-by-step video tutorial is available here:
+DENSEanalysis ships its own, **incompatible** `pixelstrain` (and a copy of
+`parseinputs`). MATLAB resolves a function name to whichever directory comes first
+on the search path, so if DENSEanalysis is added *after* HARP-I the demos fail with
+the misleading error:
 
-[**Watch the installation guide**](url_video)  
+```
+Error using pixelstrain
+Invalid spline data.
+```
+
+`HARPIsetup` now enforces the correct order (DENSEanalysis first, HARP-I last) and
+reports any HARP-I function that is still shadowed. If you manage the path yourself,
+call:
+
+```matlab
+harpi_paths                                            % auto-detect DENSEanalysis
+harpi_paths('DENSEanalysis', '/path/to/denseanalysis')  % or point at it explicitly
+```
 
 ## Examples  
 HARP-I includes demo scripts showcasing its application to **2D and 3D tagged MR images**. These can be found in the `examples/` folder.  

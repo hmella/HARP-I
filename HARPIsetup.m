@@ -14,12 +14,11 @@ function HARPIsetup(varargin)
         % for comparison, absolute search path
         curdirabs = cell(size(curdir));
         for k = 1:numel(curdir)
-            if isdir(curdir{k})
+            if isfolder(curdir{k})
                 [stat,info] = fileattrib(curdir{k});
                 curdirabs{k} = info.Name;
             end
         end
-        path
     
         % strings & files to locate
         strings = {'common','HARP-I','RBF'};
@@ -123,11 +122,18 @@ function HARPIsetup(varargin)
             for i = 1:numel(toolbox_dirs)
               addpath(genpath(toolbox_dirs{i}));
             end
-    %         addpath(tooldir{:});
             if ~isempty(adddir)
                 fprintf('Search path updated\n')
             end
         end
+
+        % Re-assert the correct ordering: DENSEanalysis first, HARP-I last.
+        % DENSEanalysis ships its own incompatible PIXELSTRAIN (and a
+        % PARSEINPUTS); if it wins the search path, demo_2D fails with the
+        % misleading error "Invalid spline data". harpi_paths also reports any
+        % function of ours that is still shadowed.
+        addpath(fullfile(basedir, 'tools'));
+        harpi_paths();
     
     
     
@@ -138,19 +144,36 @@ function HARPIsetup(varargin)
         savepath([userpath '/pathdef.m']);
         fprintf('Search path saved\n')
      
-        % add startup file to ensure the addition of paths
-        % every time that matlab start
-        fid = fopen([userpath '/startup.m'],'wt');
-        fprintf(fid, 'addpath(pathdef);');
-        fclose(fid);
-    
-        %% COMPILE MEX FILES
-    
-        % compilation options
-        if regexp(computer, '64$')
-            opts = {'-largeArrayDims'};
+        % Ensure the paths are restored every time MATLAB starts.
+        % Append to startup.m rather than overwriting it -- users routinely
+        % keep their own configuration there.
+        startupfile = fullfile(userpath, 'startup.m');
+        marker      = 'addpath(pathdef);';
+        existing    = '';
+        if isfile(startupfile)
+            existing = fileread(startupfile);
         end
-    
+        if contains(existing, marker)
+            fprintf('startup.m already restores the search path\n')
+        else
+            if ~isempty(existing)
+                backup = [startupfile '.bak'];
+                copyfile(startupfile, backup);
+                fprintf('Existing startup.m backed up to %s\n', backup);
+            end
+            fid = fopen(startupfile, 'at');
+            if fid < 0
+                warning([mfilename ':startupNotWritable'], ...
+                    'Could not update %s; add "%s" to it manually.', ...
+                    startupfile, marker);
+            else
+                if ~isempty(existing) && existing(end) ~= newline
+                    fprintf(fid, '\n');
+                end
+                fprintf(fid, '%s\n', marker);
+                fclose(fid);
+            end
+        end
     
         %% CHECK FOR LICENSES
     
