@@ -49,8 +49,14 @@
 
 function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
 
-    if nargin<5
+    % njumps is the FOURTH positional argument, not the fifth. Guarding on
+    % nargin<5 meant any call that omitted the optional ROI -- including
+    % HARPI's, which asks for 8 -- had its jump budget silently reset to 1.
+    if nargin < 4 || isempty(njumps)
         njumps = 1;
+    end
+    if nargin < 5
+        ROI = []; %#ok<NASGU>  (used only by the debug plots below)
     end
 
     % Downsample phases to make the process faster
@@ -70,10 +76,13 @@ function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
     % Maximum value on reference phase
     ref_pha_max = max(ref_pha,[],2);
 
-    % Reference distance matrix
-    r_ref = rbfx.distanceMatrix2dNew(ref_pha(1,tf_ref),ref_pha(2,tf_ref),...
-                ref_pha(1,tf_ref),ref_pha(2,tf_ref));
-    r_ref_max = max(r_ref(:));
+    % Largest distance within the reference point set.
+    %
+    % Only the maximum of the distance matrix is ever used, and the maximum
+    % is attained at convex-hull vertices, so there is no need to build the
+    % full N-by-N matrix (see extremePoints). The value is identical.
+    ref_hull  = extremePoints(ref_pha(:,tf_ref));
+    r_ref_max = maxPairDistance(ref_hull, ref_hull);
 
     % Output phase jumps
     phase_jumps = zeros([2 Nfr]);
@@ -91,23 +100,28 @@ function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
             pha_max = max(pha,[],2);
             delta = floor((ref_pha_max-pha_max)/(2*pi));
             jumps_x = [0, 2*pi*((delta(1)-njumps):(delta(1)+njumps))];
-            jumps_y = [0, 2*pi*((delta(2)-njumps):(delta(2)+njumps))];    
-            init_diff = 1e+100;
+            jumps_y = [0, 2*pi*((delta(2)-njumps):(delta(2)+njumps))];
+            init_diff = Inf;
             jump_x = 0;
             jump_y = 0;
+
+            % A candidate jump only translates this frame's point set, so its
+            % hull is the hull of the unshifted set translated by the same
+            % amount. Reduce once per frame instead of rebuilding a dense
+            % M-by-N distance matrix for each of the (2*njumps+2)^2
+            % candidates.
+            pha_hull = extremePoints(pha(:,tf));
+
             for jx=1:numel(jumps_x)
                 for jy=1:numel(jumps_y)
-                    % Current phase
-                    pha  = [flatten(Xpha(:,:,i))+jumps_x(jx),...
-                            flatten(Ypha(:,:,i))+jumps_y(jy)]';
+                    % Shifted hull of the current phase
+                    shifted = [pha_hull(1,:) + jumps_x(jx); ...
+                               pha_hull(2,:) + jumps_y(jy)];
 
-                    % Distance matrix
-                    r = rbfx.distanceMatrix2dNew(pha(1,tf),pha(2,tf),...
-                    ref_pha(1,tf_ref),ref_pha(2,tf_ref));
-                    r_max = max(r(:));
+                    r_max = maxPairDistance(shifted, ref_hull);
 
                     % Check optimality condition
-                    if abs(r_max-r_ref_max) < init_diff                
+                    if abs(r_max-r_ref_max) < init_diff
                         init_diff = abs(r_max-r_ref_max);
                         jump_x = jumps_x(jx);
                         jump_y = jumps_y(jy);
@@ -125,6 +139,8 @@ function phase_jumps = TemporalPhaseConsistency(Xpha,Ypha,ref,njumps,ROI)
 
     % Debugging loop
     if show
+      r_ref = rbfx.distanceMatrix2dNew(ref_pha(1,tf_ref),ref_pha(2,tf_ref),...
+                  ref_pha(1,tf_ref),ref_pha(2,tf_ref));
       for i = 1:Nfr
 
           % Current phase
