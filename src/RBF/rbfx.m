@@ -147,16 +147,21 @@ classdef rbfx
 %   - Efficient for small to medium-sized datasets in 2D.
 
     function [r, rx, ry] = distanceMatrix2dNew(xc,yc,x,y)
+        % Every caller in HARP-I wants only r, but rx and ry were always
+        % materialised as well -- three dense M-by-N arrays where one is
+        % needed. Build the components only when they are asked for.
         xc = xc(:);   yc = yc(:);
         if nargin==2
-            rx = xc - xc';
-            ry = yc - yc'; 
-            r = sqrt( rx.^2 + ry.^2 ); 
+            x = xc;   y = yc;
         else
             x = x(:);   y = y(:);
+        end
+        if nargout > 1
             rx = x - xc';
-            ry = y - yc'; 
-            r = sqrt( rx.^2 + ry.^2 ); 
+            ry = y - yc';
+            r  = sqrt( rx.^2 + ry.^2 );
+        else
+            r = sqrt( (x - xc').^2 + (y - yc').^2 );
         end
     end
 
@@ -215,18 +220,21 @@ classdef rbfx
 %   - Efficient for small to medium-sized datasets in 3D.
 
     function [r, rx, ry, rz] = distanceMatrix3dNew(xc,yc,zc,x,y,z)
+        % As for the 2-D version: four dense M-by-N arrays were allocated
+        % when callers only ever read r. In 3-D that dominates peak memory.
         xc = xc(:);   yc = yc(:);  zc = zc(:);
         if nargin==3
-            rx = xc - xc';
-            ry = yc - yc';
-            rz = zc - zc';
-            r = sqrt( rx.^2 + ry.^2 + rz.^2 );
+            x = xc;   y = yc;   z = zc;
         else
             x = x(:);   y = y(:);  z = z(:);
+        end
+        if nargout > 1
             rx = x - xc';
             ry = y - yc';
             rz = z - zc';
-            r = sqrt( rx.^2 + ry.^2 + rz.^2 ); 
+            r  = sqrt( rx.^2 + ry.^2 + rz.^2 );
+        else
+            r = sqrt( (x - xc').^2 + (y - yc').^2 + (z - zc').^2 );
         end
     end
 
@@ -258,9 +266,10 @@ classdef rbfx
         
             % Si eta>0, se suma eta en la diagonal de B => B = B + eta*I
             if eta > 0
-                N = length(f);          % Número de filas en f (o Nx1)
-                % (eta*norm(B,2) a veces se usa para escalar la regularización 
-                %  según la magnitud de B, pero aquí se deja comentado)
+                % Diagonal (MDI) regularization: B = B + eta*I.
+                % N must come from B: f is N-by-C (C = 2 in 2-D, 3 in 3-D),
+                % so length(f) only happens to be right while N > C.
+                N = size(B,1);
                 B(1:N+1:end) = B(1:N+1:end) + eta;
             end
             

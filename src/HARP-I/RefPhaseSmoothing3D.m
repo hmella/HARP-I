@@ -72,10 +72,17 @@ function [Xphas, Yphas, Zphas] = RefPhaseSmoothing3D(Xpha,Ypha,Zpha,method,RBFFa
     phi = feval(method);
     s = RBFFactor;
 
-    % Smooth phase using RBF interpolations
+    % Smooth phase using RBF interpolation. Centres and evaluation points
+    % coincide, so build the kernel once instead of letting RBFInterp3D
+    % construct four identical dense N-by-N matrices (see RefPhaseSmoothing).
     tf = ~isnan(Xpha) & ~isnan(Ypha) & ~isnan(Zpha);
-    fint = rbfx.RBFInterp3D([X(tf), Y(tf), Z(tf)]',[Xpha(tf), Ypha(tf), Zpha(tf)]',...
-            eta,s(1),[X(tf), Y(tf), Z(tf)]',phi);
+
+    r = rbfx.distanceMatrix3dNew([X(tf)]', [Y(tf)]', [Z(tf)]');
+    B = phi.rbf(r, s(1));
+    clear r
+    w = rbfx.solve(B, [Xpha(tf), Ypha(tf), Zpha(tf)], eta, true);
+    fint = B*w;
+
     Xphas = NaN(Isz);
     Yphas = NaN(Isz);
     Zphas = NaN(Isz);
