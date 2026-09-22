@@ -45,9 +45,16 @@ function testWrongParameterNamesRejected(t)
     % The GUI passed 'Contours'/'Resolution'; parseinputs silently dropped
     % them and the mask came back empty. It must now fail loudly.
     C = cline({ring(40,40,20,12), ring(40,40,10,12)});
-    verifyError(t, ...
-        @() getMask(struct('MaskSize',[80 80],'Contours',C,'Resolution',0.5)), ...
-        'getMask:invalidContour');
+    % Either rejection is acceptable: with HARPI_STRICT_ARGS set,
+    % assertNoUnknownArgs fires first; otherwise getMask's own validation does.
+    caught = '';
+    try
+        getMask(struct('MaskSize',[80 80],'Contours',C,'Resolution',0.5));
+    catch err
+        caught = err.identifier;
+    end
+    verifyTrue(t, ismember(caught, {'getMask:invalidContour','getMask:unknownParameter'}), ...
+        sprintf('expected a rejection, got "%s"', caught));
 end
 
 function testCornerFlagsAreHonoured(t)
