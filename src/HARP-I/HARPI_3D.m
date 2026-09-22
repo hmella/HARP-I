@@ -14,8 +14,6 @@
 %   Ih          - Input image sequence (5D array, size: [rows, cols, slices, channels, frames]).
 %   varargin    - Optional parameters specified as name-value pairs:
 %       'Mask'              - Binary mask (default: true(size(Ih))).
-%       'FOV'               - Field of view (default: []).
-%       'PixelSize'         - Pixel size (default: []).
 %       'Frames'            - Frames to be analyzed (default: all frames).
 %       'Show'              - Flag to display intermediate results (default: false).
 %       'Method'            - Interpolation method (default: 'ThinPlate').
@@ -23,9 +21,7 @@
 %       'RBFFacDist'        - Distribution of RBF factors ('quadratic', default).
 %       'eta_constant'  - Spatial smoothing factor (default: 1e-08). Equation (8) on the paper.
 %       'Seed'              - Unwrapping seed (default: 'auto').
-%       'Connectivity'      - Connectivity for unwrapping (default: 4).
 %       'RefPhaseSmoothing' - Flag for reference phase smoothing (default: false).
-%       'ROI'               - Region of interest (default: [1, rows, 1, cols, 1, slices]).
 %       'TemporalFitting'   - Flag for temporal fitting (default: false).
 %       'TemporalFittingOrder' - Temporal fitting order (default: 10).
 %       'DownsamplingFac'   - Downsampling factor (default: 2).
@@ -81,9 +77,7 @@ function [metadata] = HARPI_3D(Ih,varargin)
     %% PARSE INPUT
     % Default arguments
     defapi = struct(...
-            'Mask',              true(size(Ih)),...
-            'FOV',               [],...
-            'PixelSize',         [],...
+            'Mask',              true([size(Ih,1) size(Ih,2) size(Ih,3) size(Ih,5)]),...
             'Frames',            [],...
             'Show',              false,...
             'Method',            'ThinPlate',...
@@ -91,15 +85,14 @@ function [metadata] = HARPI_3D(Ih,varargin)
             'RBFFacDist',        'quadratic',...
             'eta_constant',  1e-08,... % Equation (8) on the paper.
             'Seed',              'auto',...
-            'Connectivity',      4,...
             'RefPhaseSmoothing', false,...
-            'ROI',               [1 size(Ih,1) 1 size(Ih,2)],...
             'TemporalFitting',   false,...
             'TemporalFittingOrder', 10,...
             'DownsamplingFac',      2);
     
     % Check input
-    api = parseinputs(defapi, [], varargin{:});
+    [api, extra_args] = parseinputs(defapi, [], varargin{:});
+    assertNoUnknownArgs(mfilename, extra_args);
     
     % input parameters
     mask = api.Mask;                    % Mask
@@ -133,10 +126,13 @@ function [metadata] = HARPI_3D(Ih,varargin)
     
     %% PHASE UNWRAPPING AND NORMALIZATION
     % Phase unwrapping
-    try
-        load([pwd,'/tmp_unwrapped_phase.mat'],'Xphar','Yphar','Zphar','dXpha','dYpha','dZpha')
-    catch
-        for i=1:Nfr
+    %
+    % NOTE: this used to cache its result in [pwd '/tmp_unwrapped_phase.mat']
+    % and reload it inside a bare try/catch. Because the cache was keyed only
+    % on the file name, processing a second subject from the same working
+    % directory silently reused the first subject's unwrapped phases. The
+    % cache has been removed; use the returned metadata to persist results.
+    for i=1:Nfr
             fprintf('\n Unwrapping frame %d of %d',i,Nfr);
             dXpha(:,:,:,i) = unwrap3(dXpha(:,:,:,i),'Mask',dmask(:,:,:,i),'PixelSize',[1 1 1],...
                                 'Seed',seed);
@@ -155,9 +151,7 @@ function [metadata] = HARPI_3D(Ih,varargin)
                 UV = NaN(Isz); UV(1:dfac:end,1:dfac:end,1:dfac:end) = dZpha(:,:,:,i);
                 Zphar = unwrap3(Zpha(:,:,:,i),'Mask',mask(:,:,:,i),'PixelSize',[1 1 1],...
                                 'Seed',seed,'UnwrappedVolume',UV);
-            end                        
         end
-        save([pwd,'/tmp_unwrapped_phase.mat'],'Xphar','Yphar','Zphar','dXpha','dYpha','dZpha')
     end
     
     if Show
@@ -185,18 +179,8 @@ function [metadata] = HARPI_3D(Ih,varargin)
     phi = feval(method);
     a = api.a_constant; % Equation (16) and (17) on the paper.
     
-    % TODO: add documentation for this part of the code
-    if numel(a) > 1
-        if strcmp(api.RBFFacDist,'DecreasingLinear')
-            a = max(a) - (max(a)-min(a))*linspace(0,1,Nfr);
-        elseif strcmp(api.RBFFacDist,'Linear')
-            a = max(a) + (max(a)-min(a))*linspace(0,1,Nfr);
-        elseif strcmp(api.RBFFacDist,'Quadratic')
-            a = min(a) + abs(power(max(a)-min(a),0.4)*linspace(-1,1,Nfr)).^2.5;
-        end
-    else
-        a = api.a_constant*ones([1 Nfr]);
-    end
+    % Per-frame shape parameter (see rbfShapeSchedule).
+    a = rbfShapeSchedule(a, api.RBFFacDist, Nfr);
     
     % Grids
     [X, Y, Z] = meshgrid(1:Isz(2),1:Isz(1),1:Isz(3));
@@ -214,34 +198,23 @@ function [metadata] = HARPI_3D(Ih,varargin)
     traj(~repmat(tf_ref,[1 1 1 3 Nfr])) = NaN;
     
     % Temporal phase consistency
-    try
-        load([pwd,'/tmp_phase_jumps.mat'],'phase_jumps')
-    catch
-        ref = 1;
-        njumps = 2;
-        phase_jumps = TemporalPhaseConsistency3D(dXpha,dYpha,dZpha,ref,njumps);
-        save([pwd,'/tmp_phase_jumps.mat'],'phase_jumps');
-    end
+    ref = 1;
+    njumps = 2;
+    phase_jumps = TemporalPhaseConsistency3D(dXpha,dYpha,dZpha,ref,njumps);
     dXpha = dXpha + reshape(phase_jumps(1,:),[1 1 1 numel(phase_jumps(1,:))]);
     dYpha = dYpha + reshape(phase_jumps(2,:),[1 1 1 numel(phase_jumps(2,:))]);
     dZpha = dZpha + reshape(phase_jumps(3,:),[1 1 1 numel(phase_jumps(3,:))]);
     
     % Reference phase
     if api.RefPhaseSmoothing
-        try
-            load([pwd,'/tmp_smoothed_unwrapped_phase.mat'],'dXpha','dYpha','dZpha')
-        catch
-            for i=1:Nfr
-                fprintf('\n Smoothing phase on frame %d of %d',i,Nfr);
-                [dXpha(:,:,:,i),dYpha(:,:,:,i),dZpha(:,:,:,i)] = RefPhaseSmoothing3D(dXpha(:,:,:,i),dYpha(:,:,:,i),dZpha(:,:,:,i),method,api.a_constant/5,eta);
-            end
-            save([pwd,'/tmp_smoothed_unwrapped_phase.mat'],'dXpha','dYpha','dZpha')        
+        for i=1:Nfr
+            fprintf('\n Smoothing phase on frame %d of %d',i,Nfr);
+            [dXpha(:,:,:,i),dYpha(:,:,:,i),dZpha(:,:,:,i)] = RefPhaseSmoothing3D(dXpha(:,:,:,i),dYpha(:,:,:,i),dZpha(:,:,:,i),method,api.a_constant/5,eta);
         end
-        Pha_ref = [flatten(dXpha(:,:,:,1)),flatten(dYpha(:,:,:,1)),flatten(dZpha(:,:,:,1))]';
     end
     
     % Interpolation loop
-    for i = 1:Nfr
+    for i = 2:Nfr
     
         fprintf('\n Estimating motion on frame %d of %d',i,Nfr);
     
@@ -324,21 +297,17 @@ function [metadata] = HARPI_3D(Ih,varargin)
     u = traj - cat(4,X,Y,Z);
     
     % Temporal fitting
+    %
+    % Not implemented for 3-D: TemporalFitting returns only [dxr, dyr], so
+    % there is no z component to assemble. This used to be a try/catch around
+    % a reference to an undefined `dz`, which reported every failure -- real
+    % ones included -- as "not yet implemented".
     u_fitted = [];
     traj_fitted = [];
-    try
-        if api.TemporalFitting
-            args = struct(...
-                'Mask',   mask,...
-                'Frames', api.Frames,...
-                'TemporalOrder', api.TemporalFittingOrder,...
-                'Show', api.Show);
-            [dx, dy] = TemporalFitting(u, args);
-            u_fitted = permute(cat(5,dx,dy,dz),[1 2 3 5 4]);
-            traj_fitted = cat(4,X,Y,Z) + u_fitted;
-        end
-    catch
-        fprintf('\nTemporalFitting has not been yet implemented for 3D data!\n')
+    if api.TemporalFitting
+        error([mfilename ':temporalFittingUnsupported'], ...
+            ['Temporal fitting is not implemented for 3-D data. ' ...
+             'Pass ''TemporalFitting'', false.']);
     end
     
     % Ouputs

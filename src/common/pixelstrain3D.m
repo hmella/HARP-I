@@ -79,7 +79,8 @@ function strain = pixelstrain3D(varargin)
         'dz',               [],...
         'Origin',           [],...
         'Orientation',      []);
-    api = parseinputs(defapi,[],varargin{:});
+    [api, extra_args] = parseinputs(defapi,[],varargin{:});
+    assertNoUnknownArgs(mfilename, extra_args);
     
     % check X/Y/Z/mask
     X = api.X;
@@ -194,7 +195,7 @@ function strain = pixelstrain3D(varargin)
     % strain calculation at each point
     dx = zeros(3,6);
     dX = zeros(3,6);
-    tf = false(3,6);
+    tf = false(1,6);
 
     for fr = 1:Ntime
         fprintf('\n Estimating strain on frame %d',fr)
@@ -202,7 +203,7 @@ function strain = pixelstrain3D(varargin)
             for j = 1:Isz(2)
                 for i = 1:Isz(1)
 
-                    if mask(i,j,k)
+                    if mask(i,j,k) && (Nneighbor_SA(i,j,k) > 1 || Nneighbor_LA(i,j,k) > 1)
 
                         dx(:) = 0;
                         dX(:) = 0;
@@ -280,7 +281,7 @@ function strain = pixelstrain3D(varargin)
 
                         % coordinate system rotation matrix
                         % (Note this is the transpose of the vector rotation matrix)
-                        Rot = [ct(i,j) st(i,j) 0; -st(i,j) ct(i,j) 0; 0 0 1];
+                        Rot = [ct(i,j,k) st(i,j,k) 0; -st(i,j,k) ct(i,j,k) 0; 0 0 1];
 
                         % radial/circumferential strain tensor
                         Erot = Rot*E*Rot';
