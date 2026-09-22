@@ -71,18 +71,11 @@ function [c] = getHarmonicCenter(K, omega, window, FOV, center)
     % Extract windowed K-space
     k = K(row0:row1,col0:col1);
     
-    % Look for maximun
+    % Look for maximum. The hand-written double loop left ii/jj undefined
+    % for an all-zero window, which then errored on the next line.
     k = abs(k);
-    v = 0.0;
-    for row = 1:size(k,1)
-        for col = 1:size(k,2)
-            if k(row,col) > v
-                v = k(row,col);
-                ii = row;
-                jj = col;
-            end
-        end
-    end
+    [~, li] = max(k(:));
+    [ii, jj] = ind2sub(size(k), li);
 
     % Local to global coefficients
     I = row0 + ii - 1;

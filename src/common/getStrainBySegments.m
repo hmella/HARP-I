@@ -175,6 +175,13 @@ function [strain] = getStrainBySegments(varargin)
         'segments_CC',   NaN([api.Nseg,Nfr]),...
         'segments_RR',   NaN([api.Nseg,Nfr]));
 
+    % Slice each frame once rather than Nseg times.
+    CCfr = cell(1,Nfr); RRfr = cell(1,Nfr);
+    for fr = 1:Nfr
+        if ~isempty(api.CC); CCfr{fr} = api.CC(:,:,fr); end
+        if ~isempty(api.RR); RRfr{fr} = api.RR(:,:,fr); end
+    end
+
     % prepare output
     segments = NaN(Isz);
     for seg=1:api.Nseg
@@ -193,14 +200,12 @@ function [strain] = getStrainBySegments(varargin)
         inseg = pos & api.Mask;
         for fr=1:Nfr
             if ~isempty(api.CC)
-                CCfr = api.CC(:,:,fr);
-                sel  = inseg & ~(CCfr > api.OutlierThreshold);
-                strain.segments_CC(seg,fr) = mean(CCfr(sel),'omitnan');
+                sel = inseg & ~(CCfr{fr} > api.OutlierThreshold);
+                strain.segments_CC(seg,fr) = mean(CCfr{fr}(sel),'omitnan');
             end
             if ~isempty(api.RR)
-                RRfr = api.RR(:,:,fr);
-                sel  = inseg & ~(RRfr > api.OutlierThreshold);
-                strain.segments_RR(seg,fr) = mean(RRfr(sel),'omitnan');
+                sel = inseg & ~(RRfr{fr} > api.OutlierThreshold);
+                strain.segments_RR(seg,fr) = mean(RRfr{fr}(sel),'omitnan');
             end
         end
 

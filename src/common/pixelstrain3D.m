@@ -197,13 +197,17 @@ function strain = pixelstrain3D(varargin)
     dX = zeros(3,6);
     tf = false(1,6);
 
+    % The mask/neighbour test is frame-independent, so evaluate it once.
+    % For a 112^3 volume over 22 frames this replaces ~31 million iterations
+    % per frame with the ~100 thousand voxels that actually qualify.
+    vox = find(mask & (Nneighbor_SA > 1 | Nneighbor_LA > 1)).';
+
     for fr = 1:Ntime
         fprintf('\n Estimating strain on frame %d',fr)
-        for k = 1:Isz(3)
-            for j = 1:Isz(2)
-                for i = 1:Isz(1)
+        for vidx = vox
+                    [i, j, k] = ind2sub(Isz, vidx);
 
-                    if mask(i,j,k) && (Nneighbor_SA(i,j,k) > 1 || Nneighbor_LA(i,j,k) > 1)
+                    if true
 
                         dx(:) = 0;
                         dX(:) = 0;
@@ -296,10 +300,6 @@ function strain = pixelstrain3D(varargin)
                         strain.LC(i,j,k,fr) = Erot(8); % 32
                         strain.LL(i,j,k,fr) = Erot(9); % 33
                     end
-
-                end
-
-            end
 
         end
 
