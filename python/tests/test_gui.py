@@ -16,6 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PySide6", reason="GUI extra not installed")
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from harpi.gui.canvas import AddContourCommand, DeleteContourCommand  # noqa: E402
@@ -644,3 +645,515 @@ def test_drawing_still_works_on_the_single_canvas(window):
     assert len(window.session.contours[(0, 0)]) == 1
     window.undo_stack.undo()
     assert not window.session.contours.get((0, 0))
+
+
+# ----------------------------------------------- tracking contours in the tab
+
+def _draw_ring(window, frame=0, n=16):
+    """A ring of nodes on one frame, as drawing produces."""
+    ds = window.session.dataset
+    yy, xx = np.nonzero(ds.mask[:, :, 0])
+    cx, cy = xx.mean(), yy.mean()
+    r = float(np.median(np.hypot(yy - cy, xx - cx)))
+    t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    ring = np.column_stack([cx + r * np.cos(t), cy + r * np.sin(t)])
+    window.session.contours[(0, frame)] = [ring]
+    window.session.labels[(0, frame)] = ["lv_epi"]
+    window.session.current_frame = frame
+    return ring
+
+
+def test_tracking_needs_the_filter(window, dataset, monkeypatch):
+    st = window.segment_tab
+    _draw_ring(window)
+    seen = {}
+    monkeypatch.setattr("harpi.gui.tabs_segment.QMessageBox.information",
+                        lambda *a, **k: seen.setdefault("msg", a[-1]))
+    st._track_contours()
+    assert "filter" in seen["msg"].lower()
+    assert not window.session.contours.get((0, 1))
+
+
+def test_tracking_fills_every_other_frame(window, dataset):
+    window.filter_tab.run()
+    st = window.segment_tab
+    ring = _draw_ring(window)
+    st._track_contours()
+    nfr = dataset.n_frames
+    for fr in range(nfr):
+        assert window.session.contours.get((0, fr)), f"frame {fr} empty"
+    assert np.array_equal(window.session.contours[(0, 0)][0], ring)
+
+
+def test_tracked_contours_actually_move(window, dataset):
+    """The point of it: copying would leave them identical."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    ring = _draw_ring(window)
+    st._track_contours()
+    moved = max(
+        np.hypot(*(window.session.contours[(0, fr)][0] - ring).T).max()
+        for fr in range(1, dataset.n_frames))
+    assert moved > 1.0, "the contours did not follow the tissue"
+
+
+def test_tracking_keeps_the_wall_label(window, dataset):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    assert window.session.labels[(0, 3)] == ["lv_epi"]
+
+
+def test_tracking_is_one_undo(window, dataset):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    assert window.session.contours.get((0, 5))
+    window.undo_stack.undo()
+    assert not window.session.contours.get((0, 5))
+    assert window.session.contours.get((0, 0)), "the drawn frame survives"
+
+
+def test_tracking_respects_the_overwrite_checkbox(window, dataset, monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    keep = np.array([[5.0, 5.0], [9.0, 5.0], [7.0, 9.0]])
+    window.session.contours[(0, 4)] = [keep]
+    window.session.labels[(0, 4)] = ["other"]
+
+    st.prop_overwrite.setChecked(False)
+    st._track_contours()
+    assert np.array_equal(window.session.contours[(0, 4)][0], keep)
+
+    st.prop_overwrite.setChecked(True)
+    st._track_contours()
+    assert not np.array_equal(window.session.contours[(0, 4)][0], keep)
+
+
+def test_tracking_reports_nothing_to_track(window, dataset, monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    window.session.current_frame = 2
+    seen = {}
+    monkeypatch.setattr("harpi.gui.tabs_segment.QMessageBox.information",
+                        lambda *a, **k: seen.setdefault("msg", a[-1]))
+    st._track_contours()
+    assert "no contours" in seen["msg"].lower()
+
+
+# ------------------------------------------- the window shown while tracking
+
+class _FakeProgress:
+    """Stands in for the dialog, and can report Cancel on a chosen call."""
+
+    def __init__(self, total, cancel_after=None):
+        self.total = total
+        self.cancel_after = cancel_after
+        self.values = []
+        self.labels = []
+        self.closed = False
+        self._calls = 0
+
+    def wasCanceled(self):
+        self._calls += 1
+        return (self.cancel_after is not None
+                and self._calls > self.cancel_after)
+
+    def setValue(self, v):
+        self.values.append(v)
+
+    def setLabelText(self, text):
+        self.labels.append(text)
+
+    def close(self):
+        self.closed = True
+
+    def deleteLater(self):
+        self.deleted = True
+
+
+def _fake_dialogs(st, monkeypatch, cancel_after=None):
+    made = []
+
+    def make(total):
+        made.append(_FakeProgress(total, cancel_after))
+        return made[-1]
+
+    monkeypatch.setattr(st, "_make_progress", make)
+    return made
+
+
+def test_tracking_shows_a_progress_window(window, dataset, monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    made = _fake_dialogs(st, monkeypatch)
+    st._track_contours()
+    assert len(made) == 1, "one window for the run"
+    assert made[0].total == dataset.n_frames - 1, "one step per hop"
+
+
+def test_the_progress_window_advances_to_the_end(window, dataset, monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    made = _fake_dialogs(st, monkeypatch)
+    st._track_contours()
+    dialog = made[0]
+    assert dialog.values == sorted(dialog.values), "progress must not go back"
+    assert max(dialog.values) == dialog.total
+    assert any("frame" in t for t in dialog.labels)
+
+
+def test_the_progress_window_closes_when_the_run_ends(window, dataset,
+                                                      monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    made = _fake_dialogs(st, monkeypatch)
+    st._track_contours()
+    assert made[0].closed
+
+
+def test_the_window_counts_every_contour(window, dataset, monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    ring = _draw_ring(window)
+    window.session.contours[(0, 0)] = [ring, ring * 0.9]
+    window.session.labels[(0, 0)] = ["lv_epi", "lv_endo"]
+    made = _fake_dialogs(st, monkeypatch)
+    st._track_contours()
+    assert made[0].total == 2 * (dataset.n_frames - 1)
+    assert max(made[0].values) == made[0].total
+
+
+def test_cancelling_changes_nothing(window, dataset, monkeypatch):
+    """A half-tracked sequence is worse than none, so a cancel writes nothing."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    made = _fake_dialogs(st, monkeypatch, cancel_after=2)
+    st._track_contours()
+    assert made[0].closed
+    assert not window.session.contours.get((0, 1))
+    assert "cancel" in st.banner.text().lower()
+
+
+def test_cancelling_leaves_the_undo_stack_alone(window, dataset, monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    before = st.undo_stack.count()
+    _fake_dialogs(st, monkeypatch, cancel_after=1)
+    st._track_contours()
+    assert st.undo_stack.count() == before
+
+
+def test_the_window_closes_when_tracking_fails(window, dataset, monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    made = _fake_dialogs(st, monkeypatch)
+    monkeypatch.setattr("harpi.tracking.track_points_2d",
+                        lambda *a, **k: (_ for _ in ()).throw(ValueError("boom")))
+    monkeypatch.setattr("harpi.gui.tabs_segment.QMessageBox.warning",
+                        lambda *a, **k: None)
+    st._track_contours()
+    assert made[0].closed
+    assert not window.session.contours.get((0, 1))
+
+
+def test_the_real_progress_window_is_modal_and_cancellable(window, dataset):
+    """The fakes above bypass the widget, so build the real one once."""
+    from PySide6.QtWidgets import QProgressDialog
+
+    dialog = window.segment_tab._make_progress(10)
+    try:
+        assert isinstance(dialog, QProgressDialog)
+        assert dialog.maximum() == 10
+        assert dialog.windowModality() == Qt.WindowModal
+        assert not dialog.wasCanceled()
+        dialog.cancel()
+        assert dialog.wasCanceled(), "the Cancel button must take effect"
+    finally:
+        dialog.close()
+
+
+def test_the_window_stays_up_while_the_frames_are_written(window, dataset,
+                                                          monkeypatch):
+    """Writing is the slower half on a long sequence. Closing the window first
+    leaves the interface looking frozen with nothing on screen to explain it.
+    """
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    made = _fake_dialogs(st, monkeypatch)
+    seen = {}
+    real_push = st.undo_stack.push
+    monkeypatch.setattr(st.undo_stack, "push",
+                        lambda cmd: (seen.update(open=not made[0].closed),
+                                     real_push(cmd))[1])
+    st._track_contours()
+    assert seen["open"], "the window had already closed"
+    assert made[0].closed, "and it must close afterwards"
+    assert any("Applying" in t for t in made[0].labels)
+
+
+def test_writing_the_frames_refreshes_once(window, dataset, monkeypatch):
+    """Per frame, the mask was rebuilt over the whole sequence: 17 frames cost
+    170 rasterisations and five seconds."""
+    from harpi.gui import tabs_segment
+
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    counts = {"mask": 0, "refresh": 0}
+    real_mask = tabs_segment.contours_to_mask
+    monkeypatch.setattr(
+        tabs_segment, "contours_to_mask",
+        lambda *a, **k: (counts.update(mask=counts["mask"] + 1),
+                         real_mask(*a, **k))[1])
+    real_refresh = type(st.canvas).refresh
+    monkeypatch.setattr(
+        type(st.canvas), "refresh",
+        lambda self, *a, **k: (counts.update(refresh=counts["refresh"] + 1),
+                               real_refresh(self, *a, **k))[1])
+    st._track_contours()
+    assert counts["refresh"] <= 2, "one refresh for the whole run"
+    assert counts["mask"] <= dataset.n_frames, "the mask is rebuilt once"
+
+
+def test_undoing_a_tracked_run_also_refreshes_once(window, dataset, monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    counts = {"refresh": 0}
+    real_refresh = type(st.canvas).refresh
+    monkeypatch.setattr(
+        type(st.canvas), "refresh",
+        lambda self, *a, **k: (counts.update(refresh=counts["refresh"] + 1),
+                               real_refresh(self, *a, **k))[1])
+    st.undo_stack.undo()
+    assert counts["refresh"] <= 2
+    assert not window.session.contours.get((0, 1))
+
+
+def test_tracking_from_a_middle_frame_fills_both_sides(window, dataset):
+    """The contour is drawn on whichever frame is clearest, which is rarely the
+    first. The frames before it must be tracked too, not left empty."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    mid = dataset.n_frames // 2
+    ring = _draw_ring(window, frame=mid)
+    st._track_contours()
+    for fr in range(dataset.n_frames):
+        assert window.session.contours.get((0, fr)), f"frame {fr} empty"
+    assert np.array_equal(window.session.contours[(0, mid)][0], ring)
+
+
+def test_the_frames_before_the_drawn_one_actually_move(window, dataset):
+    """Copying would leave them identical to the drawn contour."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    mid = dataset.n_frames // 2
+    ring = _draw_ring(window, frame=mid)
+    st._track_contours()
+    for fr in range(mid):
+        moved = np.hypot(*(window.session.contours[(0, fr)][0] - ring).T).max()
+        assert moved > 0.1, f"frame {fr} was left where it was drawn"
+
+
+def test_the_window_counts_both_directions(window, dataset, monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window, frame=dataset.n_frames // 2)
+    made = _fake_dialogs(st, monkeypatch)
+    st._track_contours()
+    assert made[0].total == dataset.n_frames - 1, "every hop, both ways"
+    assert max(made[0].values) == made[0].total
+    assert made[0].values == sorted(made[0].values)
+
+
+# ------------------------------------------- editing after the whole sequence
+
+def _count_rasters(st, monkeypatch):
+    """How many frames get rasterised by the next rebuild."""
+    from harpi.gui import tabs_segment
+
+    calls = {"n": 0}
+    real = tabs_segment.contours_to_mask
+    monkeypatch.setattr(
+        tabs_segment, "contours_to_mask",
+        lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), real(*a, **k))[1])
+    return calls
+
+
+def _move_a_node(window, st, frame=0, by=(0.7, 0.3)):
+    from harpi.gui.canvas import MovePointCommand
+
+    key = (0, frame)
+    window.session.current_frame = frame
+    st.canvas.key = key
+    old = np.array(window.session.contours[key][0][0])
+    st.undo_stack.push(MovePointCommand(st.canvas, 0, 0, old, old + np.array(by)))
+    return old
+
+
+def test_editing_one_frame_rasterises_only_that_frame(window, dataset,
+                                                      monkeypatch):
+    """Tracking leaves every frame annotated, and rasterising all of them on
+    each edit put half a second between dropping a node and the interface
+    responding."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    calls = _count_rasters(st, monkeypatch)
+    _move_a_node(window, st)
+    assert calls["n"] == 1, f"{calls['n']} frames rasterised for a one frame edit"
+
+
+def test_the_cached_mask_matches_one_built_from_scratch(window, dataset,
+                                                        monkeypatch):
+    """The check that matters: reusing frames must not change the answer."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    _move_a_node(window, st)
+    cached = window.session.mask.copy()
+    cached_structures = {k: v.copy()
+                         for k, v in window.session.structure_masks.items()}
+
+    st._mask_cache.clear()
+    st._rebuild_mask()
+    assert np.array_equal(cached, window.session.mask)
+    assert set(cached_structures) == set(window.session.structure_masks)
+    for name, m in cached_structures.items():
+        assert np.array_equal(m, window.session.structure_masks[name]), name
+
+
+def test_moving_a_node_changes_that_frames_mask(window, dataset):
+    """A cache that never invalidated would pass every timing test and leave the
+    mask showing the contour where it used to be."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    before = window.session.mask[:, :, 0].copy()
+    _move_a_node(window, st, by=(4.0, 4.0))
+    assert not np.array_equal(before, window.session.mask[:, :, 0])
+
+
+def test_the_other_frames_keep_their_masks(window, dataset):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    before = window.session.mask.copy()
+    _move_a_node(window, st, frame=0, by=(4.0, 4.0))
+    for fr in range(1, dataset.n_frames):
+        assert np.array_equal(before[:, :, fr], window.session.mask[:, :, fr]), fr
+
+
+def test_changing_the_resolution_redraws_every_frame(window, dataset,
+                                                     monkeypatch):
+    """It changes every rasterisation, so none of the cached frames survive."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    calls = _count_rasters(st, monkeypatch)
+    st.resolution.setValue(st.resolution.value() - 0.1)
+    assert calls["n"] == dataset.n_frames
+
+
+def test_changing_the_origin_redraws_every_frame(window, dataset, monkeypatch):
+    """The half pixel offset moves every mask, cached or not."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    calls = _count_rasters(st, monkeypatch)
+    window.session.mask_origin = 0.0
+    st._rebuild_mask()
+    assert calls["n"] == dataset.n_frames
+
+
+def test_undoing_an_edit_restores_the_mask(window, dataset):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    before = window.session.mask.copy()
+    _move_a_node(window, st, by=(4.0, 4.0))
+    st.undo_stack.undo()
+    assert np.array_equal(before, window.session.mask)
+
+
+def _click_out(canvas, points, label="lv_epi"):
+    """Place a contour node by node, as clicking does."""
+    canvas.start_contour(label)
+    for x, y in points:
+        canvas._drawing.append([float(x), float(y)])
+        canvas._undone_points.clear()
+        canvas.session.contours[canvas.key][-1] = np.array(canvas._drawing)
+        canvas.refresh()
+
+
+def test_drawing_rasterises_nothing_until_the_contour_is_finished(
+        window, dataset, monkeypatch):
+    """Placing nodes only redraws the scene. Rebuilding the mask on each click
+    would be the same trap as rebuilding it on each tracked frame."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    calls = _count_rasters(st, monkeypatch)
+    t = np.linspace(0, 2 * np.pi, 24, endpoint=False)
+    _click_out(st.canvas, np.column_stack([20 + 5 * np.cos(t), 20 + 5 * np.sin(t)]))
+    assert calls["n"] == 0, "the mask was rebuilt while drawing"
+
+
+def test_finishing_a_contour_rasterises_only_its_frame(window, dataset,
+                                                       monkeypatch):
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    t = np.linspace(0, 2 * np.pi, 24, endpoint=False)
+    _click_out(st.canvas, np.column_stack([20 + 5 * np.cos(t), 20 + 5 * np.sin(t)]))
+    calls = _count_rasters(st, monkeypatch)
+    assert st.canvas.finish_contour()
+    assert calls["n"] == 1, f"{calls['n']} frames rasterised for one new contour"
+
+
+def test_stepping_through_frames_rasterises_nothing(window, dataset,
+                                                    monkeypatch):
+    """Looking over what tracking produced is the common thing to do next."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    calls = _count_rasters(st, monkeypatch)
+    for fr in range(dataset.n_frames):
+        window._navigate(0, fr)
+    assert calls["n"] == 0
+
+
+def test_clearing_a_frame_is_not_an_error(window, dataset):
+    """The button passed its text where the labels go, so it raised instead."""
+    window.filter_tab.run()
+    st = window.segment_tab
+    _draw_ring(window)
+    st._track_contours()
+    window._navigate(0, 0)
+    st._clear_frame()
+    assert not window.session.contours.get((0, 0))
+    assert window.session.contours.get((0, 1)), "only this frame"
+    st.undo_stack.undo()
+    assert window.session.contours.get((0, 0))

@@ -152,23 +152,36 @@ class DeleteContourCommand(_ContourCommand):
 class SetContoursCommand(QUndoCommand):
     """Replace several frames at once. Used by propagation."""
 
-    def __init__(self, canvas, changes, labels=None, text="propagate contours"):
+    def __init__(self, canvas, changes, labels=None, *,
+                 text="propagate contours"):
         super().__init__(text)
+        if labels is not None and not hasattr(labels, "get"):
+            # the command text used to be passed here, and the mistake only
+            # surfaced as str.get when the command ran
+            raise TypeError(f"labels must be a mapping, got {type(labels).__name__}")
         self.canvas = canvas
         self.changes = changes                       # {key: [points, ...]}
         self.labels = labels or {}                   # {key: [label, ...]}
         self.previous = {k: canvas.contours_for(k) for k in changes}
         self.previous_labels = {k: list(canvas.labels_for(k)) for k in changes}
 
+    def _apply(self, contours, labels):
+        """Write every frame, then refresh once.
+
+        Refreshing per frame rebuilds the mask over the whole sequence each
+        time, so a run covering 17 frames rasterised 170 times and took five
+        seconds. Once at the end is 17.
+        """
+        for k, v in contours.items():
+            self.canvas.replace_contours(k, v, labels.get(k), notify=False)
+        self.canvas.refresh()
+        self.canvas.contoursChanged.emit()
+
     def undo(self):
-        for k, v in self.previous.items():
-            self.canvas.replace_contours(k, v, self.previous_labels.get(k))
+        self._apply(self.previous, self.previous_labels)
 
     def redo(self):
-        for k, v in self.changes.items():
-            self.canvas.replace_contours(
-                k, [np.array(p, dtype=float) for p in v], self.labels.get(k)
-            )
+        self._apply(self.changes, self.labels)
 
 
 # -------------------------------------------------------------------- view
@@ -314,14 +327,20 @@ class ImageCanvas(QGraphicsView):
         lb = labels[ci] if ci < len(labels) else ""
         return QColor(_WALL_COLOURS.get(lb, _COLOURS[ci % len(_COLOURS)]))
 
-    def replace_contours(self, key, value, labels=None):
+    def replace_contours(self, key, value, labels=None, notify=True):
+        """Replace one frame's contours.
+
+        A caller changing several frames passes ``notify=False`` and refreshes
+        once itself, the signal costing far more than the change.
+        """
         self.session.contours[key] = [np.array(p, dtype=float) for p in value]
         if labels is not None:
             self.session.labels[key] = list(labels)
         else:
             self.session.labels[key] = ["other"] * len(value)
-        self.refresh()
-        self.contoursChanged.emit()
+        if notify:
+            self.refresh()
+            self.contoursChanged.emit()
 
     def append_contour(self, key, points, label=""):
         lst = self.session.contours.setdefault(key, [])

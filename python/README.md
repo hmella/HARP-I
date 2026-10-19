@@ -78,6 +78,31 @@ points with a right click, scroll wheel zoom and drag to pan, keyboard frame
 and slice navigation, a live mask overlay, and propagation over a chosen
 frame range as a single undoable action.
 
+*Track contours through frames* saves drawing the same borders on every
+frame. Propagation copies a contour unchanged, but the tissue moves: on
+`data_2D.mat` a node travels up to 4.9 px against a wall about 8 px thick, so
+by mid systole a copied contour is half a wall out. Tracking instead follows
+each node through the harmonic phase, which labels tissue rather than space.
+Draw on whichever frame is clearest and press the button: it runs outwards in
+both directions and fills the whole cycle, as one undoable action. A window
+reports which contour and frame it is on and cancels the run, which then leaves
+every frame as it was rather than writing a half-tracked sequence. Nodes land
+within about 0.2 px of the motion solve on this dataset, and no node past half
+a tag period.
+
+It needs the filter to have run, and nothing else. In particular it needs no
+mask, which is what lets it help with producing one, and no motion solve,
+which would be circular. A few limits are worth knowing. The tags fade through
+the cycle, so late diastole is where the phase is weakest and a node can lock
+onto the neighbouring tag line; a guard compares each node with the rest of
+the contour and pulls back the ones that slipped, but it is a heuristic and
+the result is a starting point to look over, not a final answer. The
+endocardium is the harder border, since it meets the blood pool where the tags
+wash out. It is 2-D only, it depends on the harmonic centres on the Filtering
+tab being right, and it follows the nodes rather than the curve between them,
+so a contour drawn with very few nodes describes the tissue only as well as
+those nodes do.
+
 Each contour is labelled with the wall it outlines, chosen from the **wall**
 box: LV or RV, epicardium or endocardium. Contours are grouped per structure
 and each contributes the region between its outer and inner boundary, so an

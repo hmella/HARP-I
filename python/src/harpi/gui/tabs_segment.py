@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -29,6 +31,11 @@ from ..unwrap import phase_quality_2d, unwrap2
 from .canvas import DeleteContourCommand, ImageCanvas, SetContoursCommand
 from .session import Stage
 from .widgets import StageBanner, nan_range
+
+
+class _Cancelled(Exception):
+    """Raised out of the progress callback when the user presses Cancel."""
+
 
 __all__ = ["SegmentTab", "UnwrapTab"]
 
@@ -90,6 +97,8 @@ class SegmentTab(QWidget):
         super().__init__(parent)
         self.session = session
         self.undo_stack = undo_stack
+        # rasterised frames, so that editing one does not redraw the rest
+        self._mask_cache: dict = {}
 
         # One canvas, as large as the tab allows. Contours are drawn by hand and
         # a third of the width is not enough to place a point accurately. The
@@ -156,6 +165,21 @@ class SegmentTab(QWidget):
         pform.addRow("", self.prop_btn)
         pbox = QGroupBox("Propagate"); pbox.setLayout(pform)
 
+        # Copying a contour leaves it where it was drawn while the tissue moves
+        # under it. Tracking follows the harmonic phase, which labels tissue
+        # rather than space, so it needs the filter but not a mask.
+        self.track_btn = QPushButton("Track contours through frames")
+        self.track_btn.clicked.connect(self._track_contours)
+        self.track_btn.setToolTip(
+            "Follow the contours on this frame through the whole sequence, "
+            "using the tag pattern. Needs the filtered image.")
+        tform = QFormLayout()
+        tform.addRow("", QLabel(
+            "Follows the tissue instead of copying. Draw on one frame,\n"
+            "usually end diastole, then track from there."))
+        tform.addRow("", self.track_btn)
+        tbox = QGroupBox("Track"); tbox.setLayout(tform)
+
         self.resolution = QDoubleSpinBox()
         self.resolution.setRange(0.05, 2.0); self.resolution.setValue(0.5)
         self.resolution.setSingleStep(0.05)
@@ -191,6 +215,7 @@ class SegmentTab(QWidget):
         side.addWidget(self.contour_list)
         side.addWidget(mbox)
         side.addWidget(pbox)
+        side.addWidget(tbox)
         side.addWidget(self.coverage)
         side.addWidget(self.banner)
         side.addStretch(1)
@@ -230,7 +255,7 @@ class SegmentTab(QWidget):
         if not self.session.contours.get(key):
             return
         self.undo_stack.push(
-            SetContoursCommand(self.canvas, {key: []}, "clear frame")
+            SetContoursCommand(self.canvas, {key: []}, text="clear frame")
         )
 
     def _adopt_mask(self, mask, origin):
@@ -319,49 +344,193 @@ class SegmentTab(QWidget):
             return
         self.undo_stack.push(SetContoursCommand(self.canvas, changes, labels))
 
+    def _make_progress(self, total):
+        """The window shown while tracking runs.
+
+        Modal to this window, so the contours cannot be edited underneath a run
+        that is about to overwrite them.
+        """
+        dialog = QProgressDialog("Following the contours through the tags.",
+                                 "Cancel", 0, total, self)
+        dialog.setWindowTitle("Tracking")
+        dialog.setWindowModality(Qt.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        # the label changes on every step, and the window jumps about if it is
+        # left to follow the text
+        dialog.setMinimumWidth(320)
+        dialog.setValue(0)
+        return dialog
+
+    def _track_contours(self):
+        """Follow this frame's contours through the sequence with the tags."""
+        from ..tracking import track_points_2d
+
+        ds = self.session.dataset
+        if ds is None:
+            return
+        filt = self.session.result(Stage.FILTER)
+        if filt is None:
+            QMessageBox.information(
+                self, "Track",
+                "Run the filter first. Tracking follows the tag pattern, which "
+                "is what the filter extracts.")
+            return
+
+        sl = self.session.current_slice
+        src = min(self.session.current_frame, ds.n_frames - 1)
+        source = self.session.contours.get((sl, src))
+        if not source:
+            QMessageBox.information(
+                self, "Track", f"Frame {src + 1} has no contours to track.")
+            return
+        labels = list(self.session.labels.get((sl, src), []))
+
+        hops = max(ds.n_frames - 1, 1)
+        steps = len(source) * hops
+        dialog = self._make_progress(steps)
+
+        def shut():
+            # not WA_DeleteOnClose: the title bar close button would delete the
+            # widget while the progress callback is still polling it
+            dialog.close()
+            dialog.deleteLater()
+
+        tracked, corrected = [], 0
+        try:
+            for k, pts in enumerate(source):
+                arr = np.asarray(pts, dtype=float)
+                if len(arr) < 2:
+                    tracked.append(np.repeat(arr[None], ds.n_frames, axis=0))
+                    dialog.setValue((k + 1) * hops)
+                    continue
+
+                def report(done, total, stage, k=k):
+                    if dialog.wasCanceled():
+                        raise _Cancelled()
+                    dialog.setLabelText(
+                        f"Contour {k + 1} of {len(source)}: "
+                        f"{done} of {total} frames.")
+                    dialog.setValue(k * hops + done)
+                    QApplication.processEvents()
+
+                paths, info = track_points_2d(
+                    filt["image"], arr, reference=src,
+                    period=ds.pixels_per_wavelength, progress=report,
+                    return_info=True)
+                corrected += int(np.sum(info["corrected"]))
+                tracked.append(paths)
+        except _Cancelled:
+            shut()
+            self.banner.setText("Tracking cancelled, nothing changed.")
+            return
+        except Exception as exc:                      # noqa: BLE001
+            shut()
+            QMessageBox.warning(self, "Track", f"Tracking failed:\n{exc}")
+            return
+
+        # writing the frames is the slower half once the sequence is long, the
+        # mask being rebuilt over all of it, so the window stays up for it
+        dialog.setLabelText("Applying to the other frames.")
+        dialog.setValue(steps)
+        QApplication.processEvents()
+
+        changes, new_labels = {}, {}
+        for fr in range(ds.n_frames):
+            if fr == src:
+                continue
+            key = (sl, fr)
+            if self.session.contours.get(key) and not self.prop_overwrite.isChecked():
+                continue
+            changes[key] = [paths[fr].copy() for paths in tracked]
+            new_labels[key] = list(labels)
+
+        if not changes:
+            shut()
+            QMessageBox.information(
+                self, "Track", "Nothing to do (tick 'overwrite existing'?).")
+            return
+
+        self.undo_stack.push(SetContoursCommand(self.canvas, changes, new_labels))
+        shut()
+        note = (f", {corrected} node(s) pulled back into line"
+                if corrected else "")
+        self.banner.setText(
+            f"Tracked {len(source)} contour(s) from frame {src + 1} "
+            f"through {len(changes)} frames{note}. Worth a look before "
+            "estimating motion.")
+
     # ------------------------------------------------------------- refresh
     def _contours_changed(self):
         self._rebuild_mask()
         self._update_list()
         self.refresh()
 
+    def _frame_mask(self, shape, usable, resolution, origin):
+        """Rasterise one frame's contours. Returns the union and the structures,
+        or ``None`` if the union could not be built."""
+        cs = [Contour(p, label=lb) for p, lb in usable]
+        try:
+            union = contours_to_mask(cs, shape, resolution, origin=origin)
+        except Exception:
+            return None
+        try:
+            structures = structure_masks(cs, shape, resolution, origin=origin)
+        except Exception:
+            # the union is what the pipeline needs, so a failure here only
+            # costs the regional breakdown
+            structures = {}
+        return union, structures
+
     def _rebuild_mask(self):
+        """Rebuild the mask, rasterising only the frames that changed.
+
+        Every contour edit runs this, and once tracking has filled the sequence
+        every frame carries contours. Rasterising all of them on each edit put
+        half a second between dropping a node and the interface responding.
+        """
         ds = self.session.dataset
         if ds is None:
             return
         shape = ds.image.shape[:2]
         nfr = ds.n_frames
+        resolution = self.resolution.value()
+        origin = self.session.mask_origin
         mask = np.zeros(shape + (nfr,), dtype=bool)
         per_structure: dict[str, np.ndarray] = {}
         annotated = 0
+        # a fresh cache, so frames that are gone do not accumulate
+        cached, self._mask_cache = self._mask_cache, {}
         for fr in range(nfr):
             key = (self.session.current_slice, fr)
             pts = self.session.contours.get(key)
             if not pts:
                 continue
             labels = self.session.labels.get(key, [])
-            usable = [(p, labels[i] if i < len(labels) else "other")
+            usable = [(np.asarray(p, dtype=float),
+                       labels[i] if i < len(labels) else "other")
                       for i, p in enumerate(pts) if len(p) >= 3]
             if not usable:
                 continue
-            cs = [Contour(p, label=lb) for p, lb in usable]
-            origin = self.session.mask_origin
-            try:
-                mask[:, :, fr] = contours_to_mask(
-                    cs, shape, self.resolution.value(), origin=origin,
-                )
-                annotated += 1
-            except Exception:
-                continue
-            try:
-                for key, m in structure_masks(
-                        cs, shape, self.resolution.value(), origin=origin).items():
-                    per_structure.setdefault(
-                        key, np.zeros(shape + (nfr,), dtype=bool))[:, :, fr] = m
-            except Exception:
-                # the union is what the pipeline needs, so a failure here only
-                # costs the regional breakdown
-                pass
+
+            signature = (shape, resolution, origin,
+                         tuple((p.tobytes(), lb) for p, lb in usable))
+            was = cached.get(key)
+            if was is not None and was[0] == signature:
+                union, structures = was[1], was[2]
+            else:
+                built = self._frame_mask(shape, usable, resolution, origin)
+                if built is None:
+                    continue
+                union, structures = built
+
+            self._mask_cache[key] = (signature, union, structures)
+            mask[:, :, fr] = union
+            annotated += 1
+            for name, m in structures.items():
+                per_structure.setdefault(
+                    name, np.zeros(shape + (nfr,), dtype=bool))[:, :, fr] = m
 
         self.coverage.setText(f"{annotated} / {nfr} frames annotated")
 

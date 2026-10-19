@@ -44,6 +44,7 @@ from .smoothing import smooth_reference_phase
 from .analysis import (aha_labels, bullseye_rings, segment_metrics,
                        segment_table)
 from .strain import pixel_strain_2d, pixel_strain_3d, strain_by_segments
+from .tracking import track_points_2d
 from .temporal import fit_temporal
 from .types import Dataset2D, Dataset3D, MotionResult, SegmentStrain, StrainResult
 from .unwrap import phase_quality_2d, phase_quality_3d, unwrap2, unwrap3
@@ -68,6 +69,7 @@ __all__ = [
     "estimate_motion_2d", "estimate_motion_3d", "fit_temporal",
     "flip_components",
     "pixel_strain_2d", "pixel_strain_3d", "strain_by_segments",
+    "track_points_2d",
     # regional analysis
     "aha_labels", "segment_metrics", "bullseye_rings", "segment_table",
     "Contour", "contours_to_mask",

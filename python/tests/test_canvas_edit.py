@@ -263,3 +263,38 @@ def test_redo_falls_through_to_the_stack(canvas):
     assert not canvas.session.contours.get(canvas.key)
     MainWindow._redo(h)
     assert len(canvas.session.contours[canvas.key]) == 1
+
+
+# ------------------------------------------------------ clearing a frame
+
+def test_clearing_a_frame_removes_its_contours(canvas):
+    """The text was passed where the labels go, so the command called
+    ``str.get`` and the button raised instead of clearing."""
+    from harpi.gui.canvas import SetContoursCommand
+
+    _place(canvas, TRI)
+    canvas.finish_contour()
+    assert canvas.session.contours.get(canvas.key)
+    canvas.undo_stack.push(
+        SetContoursCommand(canvas, {canvas.key: []}, text="clear frame"))
+    assert not canvas.session.contours.get(canvas.key)
+
+
+def test_clearing_a_frame_can_be_undone(canvas):
+    from harpi.gui.canvas import SetContoursCommand
+
+    _place(canvas, TRI)
+    canvas.finish_contour()
+    canvas.undo_stack.push(
+        SetContoursCommand(canvas, {canvas.key: []}, text="clear frame"))
+    canvas.undo_stack.undo()
+    assert len(canvas.session.contours[canvas.key]) == 1
+
+
+def test_the_command_text_cannot_land_in_the_labels(canvas):
+    """How the button broke: the text went into the labels and the mistake only
+    surfaced later, as str.get, when the command ran."""
+    from harpi.gui.canvas import SetContoursCommand
+
+    with pytest.raises(TypeError, match="mapping"):
+        SetContoursCommand(canvas, {canvas.key: []}, "clear frame")
