@@ -12,7 +12,8 @@ import numpy as np
 from .fft import itok, ktoi
 from .harmonic import harmonic_center
 
-__all__ = ["HarpFilter2D", "HarpFilter3D", "angular_frequencies", "butterworth_3d"]
+__all__ = ["HarpFilter2D", "HarpFilter3D", "angular_frequencies", "butterworth_3d",
+           "centre_to_frequency", "frequency_to_centre"]
 
 
 def _freq_range(n: int) -> np.ndarray:
@@ -23,6 +24,34 @@ def _freq_range(n: int) -> np.ndarray:
     if n % 2:
         return np.arange(-(n - 1) / 2, (n - 1) / 2 + 1) / (n - 1)
     return np.arange(-n / 2, n / 2) / n
+
+
+def centre_to_frequency(centre, shape):
+    """Angular frequency of a k-space bin.
+
+    Parameters
+    ----------
+    centre
+        ``(row, col)`` of the harmonic peak.
+    shape
+        ``(rows, cols)`` of the image.
+
+    Returns
+    -------
+    ``(omega_x, omega_y)`` in radians per pixel.
+    """
+    rows, cols = int(shape[0]), int(shape[1])
+    row, col = float(centre[0]), float(centre[1])
+    return np.array([2 * np.pi * (col - cols / 2) / cols,
+                     2 * np.pi * (row - rows / 2) / rows])
+
+
+def frequency_to_centre(omega, shape):
+    """Inverse of :func:`centre_to_frequency`, as a ``(row, col)`` pair."""
+    rows, cols = int(shape[0]), int(shape[1])
+    wx, wy = float(omega[0]), float(omega[1])
+    return np.array([wy * rows / (2 * np.pi) + rows / 2,
+                     wx * cols / (2 * np.pi) + cols / 2])
 
 
 def angular_frequencies(shape, k1, k2):

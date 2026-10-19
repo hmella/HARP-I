@@ -46,7 +46,8 @@ def _downsample(arr: np.ndarray, factor: int, ndim: int) -> np.ndarray:
     return arr[sl]
 
 
-def temporal_phase_consistency(phases, reference=0, njumps=8, downsample=2):
+def temporal_phase_consistency(phases, reference=0, njumps=8, downsample=2,
+                               return_info=False):
     """Resolve the per-frame 2*pi offsets between unwrapped frames.
 
     Parameters
@@ -61,9 +62,16 @@ def temporal_phase_consistency(phases, reference=0, njumps=8, downsample=2):
     downsample
         Stride applied before searching.
 
+    return_info
+        Also return a dict describing the search, with ``delta`` (the coarse
+        estimate per frame) and ``offset`` (how many steps the chosen jump
+        sits away from it). An offset that never reaches ``njumps`` means
+        the budget is not binding and raising it will change nothing.
+
     Returns
     -------
-    ``(ndim, frames)`` array of additive phase offsets, each a multiple of 2*pi.
+    ``(ndim, frames)`` array of additive phase offsets, each a multiple of
+    2*pi, and optionally the search info.
     """
     phases = [np.asarray(p, dtype=float) for p in phases]
     ndim = len(phases)
@@ -89,6 +97,8 @@ def temporal_phase_consistency(phases, reference=0, njumps=8, downsample=2):
     ref_peak = ref_pts.max(axis=1)
 
     jumps = np.zeros((ndim, nfr))
+    coarse = np.zeros((ndim, nfr))
+    offset = np.zeros((ndim, nfr))
     for fr in range(nfr):
         if fr == reference:
             continue
@@ -113,5 +123,9 @@ def temporal_phase_consistency(phases, reference=0, njumps=8, downsample=2):
                 best = (diff, shift)
 
         jumps[:, fr] = best[1]
+        coarse[:, fr] = delta
+        offset[:, fr] = np.round(best[1] / (2 * np.pi)) - delta
 
+    if return_info:
+        return jumps, {"delta": coarse, "offset": offset, "njumps": int(njumps)}
     return jumps

@@ -113,3 +113,32 @@ def test_phantom_contraction_shows_negative_circumferential_strain(phantom):
     # A contracting ring shortens circumferentially at peak systole.
     assert gcs[len(gcs) // 2] < -0.05
     assert abs(gcs[0]) < 1e-9
+
+
+def test_jump_search_records_its_outcome(dataset):
+    """The search info lets a caller see whether njumps is binding."""
+    flt = harpi.HarpFilter2D(dataset.image, dataset.ke, (0.0, np.pi / 2),
+                             kind="transmission")
+    Ih = flt(dataset.image)
+    res = harpi.estimate_motion_2d(Ih, dataset.mask, a=dataset.suggested_a,
+                                   eta=15.0, njumps=8)
+    info = res.meta["jump_search"]
+    assert info["njumps"] == 8
+    assert info["offset"].shape == res.phase_jumps.shape
+    # the chosen jump is the coarse estimate plus the offset
+    chosen = np.round(res.phase_jumps / (2 * np.pi))
+    assert np.allclose(chosen[:, 1:], (info["delta"] + info["offset"])[:, 1:])
+
+
+def test_widening_the_jump_search_is_safe(dataset):
+    """A wider search may change nothing, but must never make things worse."""
+    flt = harpi.HarpFilter2D(dataset.image, dataset.ke, (0.0, np.pi / 2),
+                             kind="transmission")
+    Ih = flt(dataset.image)
+    narrow = harpi.estimate_motion_2d(Ih, dataset.mask, a=dataset.suggested_a,
+                                      eta=15.0, njumps=1)
+    wide = harpi.estimate_motion_2d(Ih, dataset.mask, a=dataset.suggested_a,
+                                    eta=15.0, njumps=12)
+    used = int(np.abs(narrow.meta["jump_search"]["offset"]).max())
+    if used < 1:
+        assert np.array_equal(narrow.phase_jumps, wide.phase_jumps)

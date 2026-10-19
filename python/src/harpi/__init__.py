@@ -28,14 +28,21 @@ DENSEanalysis, as noted in their module docstrings.
 from .config import FilterConfig, HarpiConfig, MotionConfig, StrainConfig
 from .consistency import temporal_phase_consistency
 from .fft import itok, ktoi
-from .filters import HarpFilter2D, HarpFilter3D
+from .filters import (
+    HarpFilter2D,
+    HarpFilter3D,
+    centre_to_frequency,
+    frequency_to_centre,
+)
 from .harmonic import harmonic_center
 from .interp import rbf_interpolate, solve_tikhonov
 from .io import HarpiProject, load_mat_2d, load_mat_3d, save_mat
-from .motion import estimate_motion_2d, estimate_motion_3d
+from .motion import estimate_motion_2d, estimate_motion_3d, flip_components
 from .rbf import KERNELS, RBFKernel, get_kernel
 from .segmentation import Contour, contours_to_mask
 from .smoothing import smooth_reference_phase
+from .analysis import (aha_labels, bullseye_rings, segment_metrics,
+                       segment_table)
 from .strain import pixel_strain_2d, pixel_strain_3d, strain_by_segments
 from .temporal import fit_temporal
 from .types import Dataset2D, Dataset3D, MotionResult, SegmentStrain, StrainResult
@@ -53,10 +60,14 @@ __all__ = [
     # pipeline
     "itok", "ktoi",
     "HarpFilter2D", "HarpFilter3D", "harmonic_center",
+    "centre_to_frequency", "frequency_to_centre",
     "phase_quality_2d", "phase_quality_3d", "unwrap2", "unwrap3",
     "temporal_phase_consistency", "smooth_reference_phase",
     "rbf_interpolate", "solve_tikhonov", "get_kernel", "KERNELS", "RBFKernel",
     "estimate_motion_2d", "estimate_motion_3d", "fit_temporal",
+    "flip_components",
     "pixel_strain_2d", "pixel_strain_3d", "strain_by_segments",
+    # regional analysis
+    "aha_labels", "segment_metrics", "bullseye_rings", "segment_table",
     "Contour", "contours_to_mask",
 ]

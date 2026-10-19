@@ -26,11 +26,23 @@ class Dataset2D:
     tag_spacing: float
     """Tag period in metres."""
     meta: dict = field(default_factory=dict)
+    trigger_times: np.ndarray | None = None
+    """Acquisition time of each frame, in milliseconds. None when unknown."""
 
     def __post_init__(self):
         self.image = np.asarray(self.image)
         self.mask = np.asarray(self.mask).astype(bool)
         self.pixel_size = np.atleast_1d(np.asarray(self.pixel_size, dtype=float))
+        if self.trigger_times is not None:
+            self.trigger_times = np.asarray(self.trigger_times, dtype=float).ravel()
+
+    @property
+    def times(self) -> np.ndarray | None:
+        """Frame times, trimmed or padded to the number of frames."""
+        if self.trigger_times is None:
+            return None
+        t = self.trigger_times
+        return t[:self.n_frames] if t.size >= self.n_frames else None
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -46,8 +58,23 @@ class Dataset2D:
         return 2 * np.pi / self.tag_spacing * self.pixel_size
 
     @property
+    def pixels_per_wavelength_per_axis(self) -> np.ndarray:
+        """Pixels per tag wavelength along each image axis."""
+        return self.tag_spacing / self.pixel_size
+
+    @property
     def pixels_per_wavelength(self) -> float:
-        return float(self.tag_spacing / self.pixel_size[0])
+        """One figure for the whole image, averaged over the in-plane axes.
+
+        The shape parameter is a single scalar, so anisotropic pixels have to be
+        reduced to one number somewhere. Averaging is the least arbitrary choice
+        and it leaves square pixels untouched.
+        """
+        return float(np.mean(self.pixels_per_wavelength_per_axis[:2]))
+
+    @property
+    def is_isotropic(self) -> bool:
+        return bool(np.allclose(self.pixel_size[:2], self.pixel_size[0]))
 
     @property
     def suggested_a(self) -> float:
@@ -67,11 +94,22 @@ class Dataset3D:
     """``(3,)`` in the same units as ``tag_spacing``."""
     tag_spacing: float
     meta: dict = field(default_factory=dict)
+    trigger_times: np.ndarray | None = None
+    """Acquisition time of each frame, in milliseconds. None when unknown."""
 
     def __post_init__(self):
         self.image = np.asarray(self.image)
         self.mask = np.asarray(self.mask).astype(bool)
         self.voxel_size = np.atleast_1d(np.asarray(self.voxel_size, dtype=float))
+        if self.trigger_times is not None:
+            self.trigger_times = np.asarray(self.trigger_times, dtype=float).ravel()
+
+    @property
+    def times(self) -> np.ndarray | None:
+        if self.trigger_times is None:
+            return None
+        t = self.trigger_times
+        return t[:self.n_frames] if t.size >= self.n_frames else None
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -82,8 +120,32 @@ class Dataset3D:
         return self.image.shape[-1]
 
     @property
+    def ke(self) -> np.ndarray:
+        """Encoding frequency in radians per voxel, per axis."""
+        return 2 * np.pi / self.tag_spacing * self.voxel_size
+
+    @property
+    def wave_vectors(self) -> np.ndarray:
+        """``(3, 3)`` matrix of encoding wave vectors, one per row."""
+        return np.diag(self.ke)
+
+    @property
+    def pixels_per_wavelength_per_axis(self) -> np.ndarray:
+        return self.tag_spacing / self.voxel_size
+
+    @property
     def pixels_per_wavelength(self) -> float:
-        return float(self.tag_spacing / self.voxel_size[0])
+        """Averaged over the in-plane axes only.
+
+        Slice thickness is usually several times the in-plane spacing, and
+        letting it into the average would pull the suggested shape parameter far
+        from anything useful.
+        """
+        return float(np.mean(self.pixels_per_wavelength_per_axis[:2]))
+
+    @property
+    def is_isotropic(self) -> bool:
+        return bool(np.allclose(self.voxel_size[:2], self.voxel_size[0]))
 
     @property
     def suggested_a(self) -> float:

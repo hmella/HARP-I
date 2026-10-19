@@ -105,6 +105,7 @@ def read_dicom_series(directory, series_uid=None, tag_spacing=None,
 
     keys = sorted(groups, key=str)
     per_encoding = []
+    per_encoding_times = []
     for k in keys:
         items = groups[k]
         items.sort(key=lambda t: (
@@ -112,15 +113,29 @@ def read_dicom_series(directory, series_uid=None, tag_spacing=None,
             int(getattr(t[1], "InstanceNumber", 0) or 0),
         ))
         frames = []
+        times = []
         for _, ds in items:
             arr = ds.pixel_array.astype(float)
             slope = float(getattr(ds, "RescaleSlope", 1) or 1)
             inter = float(getattr(ds, "RescaleIntercept", 0) or 0)
             frames.append(arr * slope + inter)
+            t = getattr(ds, "TriggerTime", None)
+            times.append(float(t) if t is not None else np.nan)
         per_encoding.append(np.stack(frames, axis=-1))
+        per_encoding_times.append(np.asarray(times, dtype=float))
 
     n = min(a.shape[-1] for a in per_encoding)
     image = np.stack([a[..., :n] for a in per_encoding], axis=2)
+
+    # The encodings are acquired together, so one set of frame times serves.
+    # Discard them unless they are complete and increasing, since a partial or
+    # unsorted set would quietly put the wrong numbers on every time axis.
+    trigger_times = None
+    for t in per_encoding_times:
+        t = t[:n]
+        if t.size == n and np.all(np.isfinite(t)) and np.all(np.diff(t) > 0):
+            trigger_times = t
+            break
 
     ref = files[0][1]
     pixel_spacing = np.asarray(getattr(ref, "PixelSpacing", [1.0, 1.0]), dtype=float)
@@ -142,6 +157,7 @@ def read_dicom_series(directory, series_uid=None, tag_spacing=None,
         mask=np.ones(image.shape[:2] + (image.shape[-1],), dtype=bool),
         pixel_size=pixel_spacing,
         tag_spacing=float(tag_spacing),
+        trigger_times=trigger_times,
         meta={"source": str(directory), "series_uid": series_uid,
               "encodings": [str(k) for k in keys]},
     )

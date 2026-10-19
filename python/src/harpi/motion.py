@@ -28,7 +28,75 @@ from .temporal import fit_temporal
 from .types import MotionResult
 from .unwrap import phase_quality_2d, unwrap2, unwrap3
 
-__all__ = ["estimate_motion_2d", "estimate_motion_3d", "shape_schedule"]
+__all__ = ["estimate_motion_2d", "estimate_motion_3d", "shape_schedule",
+           "flip_components"]
+
+
+def flip_components(result, swap_xy=False, flip_x=False, flip_y=False, flip_z=False):
+    """Rearrange the displacement components of a result.
+
+    The sign and the order of the components follow the tag directions given
+    to the filter and the row and column convention of the images. When those
+    do not match the acquisition, the recovered motion comes out mirrored or
+    with x and y exchanged. This applies the correction after the fact, so
+    there is no need to solve again.
+
+    Parameters
+    ----------
+    result
+        A :class:`~harpi.types.MotionResult`.
+    swap_xy
+        Exchange the first two components.
+    flip_x, flip_y, flip_z
+        Negate a component. ``flip_z`` is ignored for 2-D results.
+
+    Returns
+    -------
+    A new :class:`~harpi.types.MotionResult`. Trajectories are rebuilt from
+    the reference grid so they stay consistent with the displacement.
+    """
+    from copy import copy
+
+    if not (swap_xy or flip_x or flip_y or flip_z):
+        return result
+
+    ndim = result.u.shape[-2]
+    order = list(range(ndim))
+    if swap_xy and ndim >= 2:
+        order[0], order[1] = order[1], order[0]
+    signs = np.ones(ndim)
+    for i, f in enumerate((flip_x, flip_y, flip_z)[:ndim]):
+        if f:
+            signs[i] = -1.0
+
+    def apply(u):
+        if u is None:
+            return None
+        out = np.take(u, order, axis=-2)
+        shape = [1] * u.ndim
+        shape[-2] = ndim
+        return out * signs.reshape(shape)
+
+    out = copy(result)
+    out.u = apply(result.u)
+    out.u_fitted = apply(result.u_fitted)
+
+    if result.trajectories is not None:
+        isz = result.u.shape[:-2]
+        if ndim == 2:
+            Xg, Yg = np.meshgrid(np.arange(1, isz[1] + 1), np.arange(1, isz[0] + 1))
+            grid = np.stack([Xg, Yg], axis=-1)
+        else:
+            Xg, Yg, Zg = np.meshgrid(np.arange(1, isz[1] + 1),
+                                     np.arange(1, isz[0] + 1),
+                                     np.arange(1, isz[2] + 1))
+            grid = np.stack([Xg, Yg, Zg], axis=-1)
+        out.trajectories = grid[..., np.newaxis] + out.u
+
+    out.meta = dict(result.meta)
+    out.meta["flip"] = {"swap_xy": bool(swap_xy), "flip_x": bool(flip_x),
+                        "flip_y": bool(flip_y), "flip_z": bool(flip_z)}
+    return out
 
 
 def shape_schedule(a, dist: str, nfr: int) -> np.ndarray:
@@ -165,8 +233,10 @@ def estimate_motion_2d(
 
     if progress:
         progress(0, nfr, "consistency")
-    jumps = temporal_phase_consistency([dxpha, dypha], reference=reference,
-                                       njumps=njumps, downsample=2)
+    jumps, jump_info = temporal_phase_consistency(
+        [dxpha, dypha], reference=reference, njumps=njumps, downsample=2,
+        return_info=True,
+    )
     dxpha = dxpha + jumps[0][None, None, :]
     dypha = dypha + jumps[1][None, None, :]
 
@@ -222,7 +292,9 @@ def estimate_motion_2d(
         phase_jumps=jumps,
         quality=quality,
         unwrap_complete=complete,
-        meta={"kernel": kern.name, "a": a_sched, "eta": eta, "downsample": dfac},
+        meta={"kernel": kern.name, "a": a_sched, "eta": eta, "downsample": dfac,
+              "njumps": njumps, "jump_search": jump_info,
+              "temporal_order": temporal_order if temporal_fit else None},
     )
 
 
@@ -293,8 +365,9 @@ def estimate_motion_3d(
 
     if progress:
         progress(0, nfr, "consistency")
-    jumps = temporal_phase_consistency(dpha, reference=reference, njumps=njumps,
-                                       downsample=2)
+    jumps, jump_info = temporal_phase_consistency(
+        dpha, reference=reference, njumps=njumps, downsample=2, return_info=True,
+    )
     for d in range(3):
         dpha[d] = dpha[d] + jumps[d][None, None, None, :]
 
@@ -351,5 +424,6 @@ def estimate_motion_3d(
         trajectories=traj,
         phase_jumps=jumps,
         unwrap_complete=complete,
-        meta={"kernel": kern.name, "a": a_sched, "eta": eta, "downsample": dfac},
+        meta={"kernel": kern.name, "a": a_sched, "eta": eta, "downsample": dfac,
+              "njumps": njumps, "jump_search": jump_info},
     )

@@ -18,7 +18,7 @@ import numpy as np
 
 __all__ = ["HarpiProject"]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _sha256(path, chunk=1 << 20) -> str:
@@ -77,6 +77,7 @@ class HarpiProject:
                     f"{path} was written by a newer version of harpi "
                     f"(schema {meta['schema_version']} > {SCHEMA_VERSION})"
                 )
+            meta = migrate(meta)
             arrays = {}
             for item in z.namelist():
                 if item.startswith("arrays/") and item.endswith(".npy"):
@@ -106,6 +107,39 @@ class HarpiProject:
         if not p.exists():
             return None
         return _sha256(p) == self.source_sha256
+
+
+def _migrate_1_to_2(meta):
+    """Pin the mask sampling convention that version 1 used.
+
+    Version 1 rasterised contours at integer canvas coordinates, which are pixel
+    corners rather than centres, so its masks sit half a pixel off what was
+    drawn. Reopening such a project has to reproduce the mask it was saved with,
+    so the old value is recorded explicitly rather than inherited from whatever
+    the current default happens to be.
+    """
+    cfg = dict(meta.get("config") or {})
+    segment = dict(cfg.get("segment") or {})
+    segment.setdefault("mask_origin", 0.0)
+    cfg["segment"] = segment
+    meta["config"] = cfg
+    return meta
+
+
+_MIGRATIONS = {1: _migrate_1_to_2}
+
+
+def migrate(meta):
+    """Bring a loaded meta block up to the current schema, one step at a time."""
+    version = int(meta.get("schema_version", 1))
+    while version < SCHEMA_VERSION:
+        step = _MIGRATIONS.get(version)
+        if step is None:
+            raise ValueError(f"no migration from schema {version}")
+        meta = step(meta)
+        version += 1
+        meta["schema_version"] = version
+    return meta
 
 
 def _jsonable(obj):
