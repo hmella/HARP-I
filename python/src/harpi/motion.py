@@ -358,6 +358,8 @@ def estimate_motion_3d(
     mask = np.asarray(mask, dtype=bool)
     if mask.ndim == 3:
         mask = np.repeat(mask[..., None], nfr, axis=3)
+    if mask.shape[:3] != isz:
+        raise ValueError("mask and image disagree on spatial shape")
 
     if a is None:
         raise ValueError("the shape parameter 'a' is required")
@@ -401,7 +403,18 @@ def estimate_motion_3d(
         dpha[d] = dpha[d] + jumps[d][None, None, None, :]
 
     if smooth_reference:
-        ref_pha = smooth_reference_phase(ref_pha, kern, a_sched[0] / 5, eta)
+        # HARPI_3D.m:204-208 smooths the downsampled phases of every frame, the
+        # ones that become the interpolation centres, and leaves the
+        # full-resolution reference alone. Smoothing the reference instead, as
+        # this did, is both the wrong array and a dense system the size of the
+        # volume.
+        for i in range(nfr):
+            if progress:
+                progress(i, nfr, "smooth")
+            smoothed = smooth_reference_phase(
+                [dpha[d][..., i] for d in range(3)], kern, a_sched[0] / 5, eta)
+            for d in range(3):
+                dpha[d][..., i] = smoothed[d]
 
     grids = np.meshgrid(np.arange(1, isz[1] + 1), np.arange(1, isz[0] + 1),
                         np.arange(1, isz[2] + 1))

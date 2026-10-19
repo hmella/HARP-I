@@ -137,7 +137,10 @@ class Session(QObject):
             return True
         if stage == Stage.SEGMENT:
             return self.has(Stage.DATA)
-        return all(self.has(s) for s in Stage if s < stage and s != Stage.SEGMENT) and (
+        # Unwrapping is advisory. The solver unwraps internally, so requiring
+        # the preview first only forced the same work to be done twice.
+        advisory = {Stage.SEGMENT, Stage.UNWRAP}
+        return all(self.has(s) for s in Stage if s < stage and s not in advisory) and (
             self.mask is not None or stage <= Stage.SEGMENT
         )
 

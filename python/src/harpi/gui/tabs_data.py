@@ -152,6 +152,20 @@ class DataTab(QWidget):
         self._adopt(ds, path)
 
     def _adopt(self, ds, path):
+        # One place to refuse 3-D. Everything downstream assumes a 2-D series:
+        # the canvases, the contour tools, the segment wedges and the strain
+        # panels. Half-accepting a volume used to fail later in several
+        # different ways, each of them confusing. The library handles 3-D, so
+        # the message points at it.
+        if getattr(ds, "image", None) is not None and ds.image.ndim != 4:
+            self.banner.setText(
+                f"This looks like a {ds.image.ndim - 2}-D volume "
+                f"{ds.image.shape}. The interface works on a 2-D series.\n\n"
+                "Use harpi.estimate_motion_3d from a script for volumes, or "
+                "load a single slice here."
+            )
+            return False
+
         self._loading = True
         self.session.dataset = ds
         self.session.set_result(Stage.DATA, ds)
@@ -180,6 +194,7 @@ class DataTab(QWidget):
         self._loading = False
         self._refresh_derived()
         self.refresh()
+        return True
 
     def _params_edited(self):
         if self._loading or self.session.dataset is None:

@@ -15,7 +15,7 @@ from .rbf import get_kernel
 __all__ = ["smooth_reference_phase"]
 
 
-def smooth_reference_phase(phases, kernel, a, eta):
+def smooth_reference_phase(phases, kernel, a, eta, max_points=12000):
     """Smooth a set of co-registered phase maps.
 
     Parameters
@@ -24,6 +24,12 @@ def smooth_reference_phase(phases, kernel, a, eta):
         Sequence of arrays of equal shape, NaN outside the mask.
     kernel, a, eta
         Kernel name or record, shape parameter, Tikhonov weight.
+    max_points
+        Refuse rather than attempt a dense system larger than this. One kernel
+        matrix is held for all the valid points at once, so the memory grows as
+        the square of their number: 12000 points is about 1.1 GiB, and a
+        full-resolution volume reaches tens of gibibytes. Raise it deliberately
+        if the machine can take it.
 
     Returns
     -------
@@ -36,6 +42,15 @@ def smooth_reference_phase(phases, kernel, a, eta):
     valid = np.ones(shape, dtype=bool)
     for p in phases:
         valid &= ~np.isnan(p)
+
+    n_valid = int(valid.sum())
+    if max_points is not None and n_valid > max_points:
+        need = n_valid * n_valid * 8 / 2 ** 30
+        raise ValueError(
+            f"smoothing {n_valid} points needs a dense {n_valid} by {n_valid} "
+            f"matrix, about {need:.1f} GiB. Smooth a downsampled set instead, "
+            f"or raise max_points past {n_valid} if there is room."
+        )
 
     grids = np.meshgrid(*[np.arange(1, n + 1) for n in shape], indexing="ij")
     # X varies along the columns.

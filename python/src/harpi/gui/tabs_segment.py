@@ -466,11 +466,18 @@ class UnwrapTab(QWidget):
         box.setToolTip("These settings are used by the motion solver too.")
 
         self.status = QListWidget()
-        self.banner = StageBanner("Segment the myocardium first.")
+        self.source_lbl = QLabel("-")
+        self.banner = StageBanner(
+            "Segment the myocardium first.\n\n"
+            "This is a preview. Motion estimation unwraps internally, so it can "
+            "be run without coming here, and once it has run this tab shows "
+            "what the solve actually did."
+        )
 
         side = QVBoxLayout()
         side.addWidget(box)
         side.addWidget(self.run_btn)
+        side.addWidget(self.source_lbl)
         side.addWidget(QLabel("per-frame result:"))
         side.addWidget(self.status)
         side.addWidget(self.banner)
@@ -561,11 +568,39 @@ class UnwrapTab(QWidget):
         )
         self.refresh()
 
+    def _from_solve(self):
+        """The solver's own unwrapping, when a motion result exists.
+
+        The preview and the solver can legitimately disagree: the solver works
+        on a downsampled grid and seeds later frames from the reference, which
+        the preview does not. Showing the solver's arrays once they exist means
+        the per-frame flags on screen are the ones the solve acted on.
+        """
+        res = self.session.result(Stage.MOTION)
+        if res is None or getattr(res, "unwrapped_phase", None) is None:
+            return None
+        phase = res.unwrapped_phase
+        complete = res.unwrap_complete
+        nfr = phase.shape[-1]
+        return {
+            "phase": [[phase[:, :, 0, i], phase[:, :, 1, i]] for i in range(nfr)],
+            "quality": [None if res.quality is None else res.quality[:, :, i]
+                        for i in range(nfr)],
+            "complete": (np.ones(nfr, bool) if complete is None
+                         else np.asarray(complete, bool)),
+        }
+
     def refresh(self):
-        res = self.session.result(Stage.UNWRAP)
+        solved = self._from_solve()
+        res = solved if solved is not None else self.session.result(Stage.UNWRAP)
         self.status.clear()
         if res is None:
+            self.source_lbl.setText("nothing unwrapped yet")
             return
+        self.source_lbl.setText(
+            "showing the motion solve" if solved is not None
+            else "showing this tab's preview")
+
         for fr, ph in enumerate(res["phase"]):
             if ph is None:
                 self.status.addItem(f"frame {fr + 1}: not segmented")

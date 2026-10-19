@@ -248,6 +248,15 @@ def strain_by_segments(strain, n_segments=6, clockwise=False, origin=None,
     """
     mask = np.asarray(strain.mask, dtype=bool)
     isz = mask.shape
+    if mask.ndim != 2:
+        # The wedge is built from a 2-D meshgrid over the leading axes, so on a
+        # volume the angular assignment is wrong for every slice but one. On a
+        # cubic volume that used to pass silently and return plausible numbers.
+        raise ValueError(
+            f"strain_by_segments works on a 2-D slice, got a {mask.ndim}-D mask "
+            f"of shape {isz}. Equiangular segments are a short-axis construct; "
+            "pass one slice at a time."
+        )
     Xg, Yg = np.meshgrid(np.arange(1, isz[1] + 1), np.arange(1, isz[0] + 1))
 
     if origin is None:
