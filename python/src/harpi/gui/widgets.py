@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
+from collections import namedtuple
+
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSlider,
     QSpinBox,
     QWidget,
 )
 
 __all__ = ["Navigator", "FrameSpin", "MplCanvas", "StageBanner",
-           "mask_bbox", "nan_range"]
+           "mask_bbox", "nan_range", "BACKGROUND_CHOICES", "Background",
+           "background_image", "BackgroundControls"]
 
 
 class FrameSpin(QSpinBox):
@@ -188,3 +196,107 @@ def nan_range(a, lo=2, hi=98):
     if f.size == 0:
         return 0.0, 1.0
     return float(np.percentile(f, lo)), float(np.percentile(f, hi))
+
+
+# What a tab can draw underneath its own data, in the order the boxes offer it.
+BACKGROUND_CHOICES = (
+    ("Magnitude (raw)", "magnitude"),
+    ("Magnitude (raw, encoding 2)", "magnitude2"),
+    ("Harmonic magnitude (filtered)", "harmonic"),
+    ("Harmonic phase 1", "phase1"),
+    ("Harmonic phase 2", "phase2"),
+)
+
+Background = namedtuple("Background", "array vmin vmax cmap title choice")
+"""One frame ready to draw. ``cmap`` is None for the grey images, which is
+what ImageCanvas expects; a matplotlib caller passes ``cmap or "gray"``."""
+
+
+def background_image(dataset, filt, choice, frame, slice_index=0):
+    """The tagged image a tab draws its own layer over.
+
+    ``filt`` is the filter stage result, or None when it has not run, in which
+    case a harmonic choice falls back to the raw magnitude. The returned
+    ``choice`` is the one actually used, so a caller can say that it
+    substituted. Returns None when there is no dataset.
+    """
+    if dataset is None or getattr(dataset, "image", None) is None:
+        return None
+    image = dataset.image
+    frame = int(np.clip(frame, 0, image.shape[-1] - 1))
+
+    def plane(array, encoding):
+        """One frame of one encoding, whether or not there is a slice axis."""
+        encoding = int(np.clip(encoding, 0, array.shape[-2] - 1))
+        if array.ndim == 5:
+            sl = int(np.clip(slice_index, 0, array.shape[2] - 1))
+            return array[:, :, sl, encoding, frame]
+        return array[:, :, encoding, frame]
+
+    if choice not in ("magnitude", "magnitude2") and filt is None:
+        choice = "magnitude"
+
+    if choice == "magnitude2":
+        a = np.real(plane(image, 1))
+        return Background(a, *nan_range(a), None, "magnitude, encoding 2",
+                          choice)
+    if choice == "harmonic":
+        a = np.abs(plane(filt["image"], 0))
+        return Background(a, *nan_range(a), None, "harmonic magnitude", choice)
+    if choice in ("phase1", "phase2"):
+        d = 0 if choice == "phase1" else 1
+        a = np.angle(plane(filt["image"], d))
+        return Background(a, -np.pi, np.pi, "twilight",
+                          f"harmonic phase {d + 1}", choice)
+    a = np.real(plane(image, 0))
+    return Background(a, *nan_range(a), None, "magnitude", "magnitude")
+
+
+class BackgroundControls(QGroupBox):
+    """Whether to draw the tagged image under a plot, which one, and how
+    strongly the data layer covers it."""
+
+    changed = Signal()
+
+    def __init__(self, title="Background", parent=None):
+        super().__init__(title, parent)
+        # not called "show": QWidget already defines that
+        self.active = QCheckBox("over the tagged image")
+        self.active.setChecked(True)
+        self.image = QComboBox()
+        for label, key in BACKGROUND_CHOICES:
+            self.image.addItem(label, key)
+        self.alpha = QSlider(Qt.Horizontal)
+        self.alpha.setRange(10, 100)
+        self.alpha.setValue(75)
+        self.alpha_lbl = QLabel("75%")
+
+        self.active.toggled.connect(self._emit)
+        self.image.currentIndexChanged.connect(self._emit)
+        self.alpha.valueChanged.connect(self._alpha_changed)
+
+        form = QFormLayout()
+        form.addRow("", self.active)
+        form.addRow("image", self.image)
+        row = QHBoxLayout()
+        row.addWidget(self.alpha); row.addWidget(self.alpha_lbl)
+        holder = QWidget(); holder.setLayout(row)
+        form.addRow("data opacity", holder)
+        self.setLayout(form)
+
+    def _alpha_changed(self, value):
+        self.alpha_lbl.setText(f"{value}%")
+        self._emit()
+
+    def _emit(self, *_):
+        self.changed.emit()
+
+    def opacity(self):
+        """Alpha for the data layer, 0 to 1."""
+        return self.alpha.value() / 100.0
+
+    def choice(self):
+        return self.image.currentData()
+
+    def wanted(self):
+        return self.active.isChecked()

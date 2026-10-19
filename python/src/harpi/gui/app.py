@@ -203,18 +203,32 @@ class MainWindow(QMainWindow):
         self.nav.play.setText("Pause" if on else "Play")
         self._timer.start() if on else self._timer.stop()
 
+    CANVAS_NAMES = ("canvas", "k_before", "k_after", "mag", "qual", "u1", "u2")
+
+    def _canvases(self):
+        """Every image canvas on the tab in front, which is what M and F act
+        on. They used to reach only the Segmentation tab, so on Filtering the
+        key did nothing to the overlay actually on screen."""
+        w = self.tabs.currentWidget()
+        found = list(getattr(w, "canvases", []))
+        for name in self.CANVAS_NAMES:
+            c = getattr(w, name, None)
+            if c is not None and c not in found:
+                found.append(c)
+        return found
+
     def _toggle_mask(self):
-        for c in self.segment_tab.canvases:
+        for c in self._canvases():
             c.toggle_mask()
 
     def _fit(self):
-        w = self.tabs.currentWidget()
-        for c in getattr(w, "canvases", []):
+        for c in self._canvases():
             c.fit()
-        for name in ("canvas", "k_before", "k_after", "mag", "qual", "u1", "u2"):
-            c = getattr(w, name, None)
-            if c is not None:
-                c.fit()
+        # Motion, Strain and Compare hold a matplotlib canvas instead, which
+        # has nothing to frame
+        plot = getattr(self.tabs.currentWidget(), "plot", None)
+        if plot is not None:
+            plot.draw()
 
     def keyPressEvent(self, event):
         if self.tabs.currentWidget() is self.segment_tab:
@@ -299,7 +313,8 @@ class MainWindow(QMainWindow):
         }
         if self.session.mask is not None:
             p.arrays["mask"] = self.session.mask
-        p.config = {"segment": {"mask_origin": self.session.mask_origin}}
+        p.config = {"segment": {"mask_origin": self.session.mask_origin},
+                    "strain": self.strain_tab.geometry_config()}
         p.save(path)
         self.session.project_path = path
         self.session.dirty = False
@@ -350,6 +365,11 @@ class MainWindow(QMainWindow):
         self.session.mask_origin = 0.5 if origin is None else float(origin)
         if "mask" in p.arrays:
             self.session.mask = p.arrays["mask"].astype(bool)
+            # without this the mask reads as drawn-from-contours, and the next
+            # rebuild, which any contour edit or resolution change triggers,
+            # throws it away
+            self.session.mask_source = "file"
+        self.strain_tab.apply_geometry_config((p.config or {}).get("strain"))
         self.session.project_path = str(path)
         self.session.dirty = False
         self._update_headers()

@@ -179,6 +179,34 @@ res = harpi.flip_components(res, swap_xy=True, flip_y=True)
 After an estimate the view moves to the frame with the most motion, since
 the reference frame has none by definition.
 
+The Motion and Strain maps are drawn over the tagged image, so the numbers
+sit on the anatomy they describe rather than on a blank background. The
+**Background** box turns it off, chooses which image goes underneath, and
+sets how strongly the data covers it. The arrows stay solid whatever the
+opacity, being line art that hides almost nothing.
+
+On the Strain tab the AHA segments are oriented by the two
+right-ventricular insertion points, anterior and inferior, each set
+numerically or by clicking the map. The anterior one is the boundary
+between segment 1, anterior, and segment 2, anteroseptal, which is what the
+AHA statement means by using the insertion to separate the septum from the
+anterior wall. The pair also fixes which way the numbering runs, the septum
+being the shorter arc between them, so the *clockwise* box applies only
+when a single point is given.
+
+The wedges stay equiangular, 60 degrees for six and 90 for four, as the
+model specifies. The points orient it, they do not stretch it, so what the
+two actually span is reported beside them against the ideal. A departure
+beyond about 45 degrees usually means the two points are the wrong way
+round, and it says so.
+
+Before this the segments were numbered from half a turn away from the
+insertion. The wedges and their boundaries were right, but segment 1 sat
+nearly opposite the ray, so every name landed on the wrong wall and "mid
+anterior" reported the inferolateral segment. Results read off a bullseye
+produced by an earlier version need that rotation applied before they are
+compared with these.
+
 Long solves run on a worker thread with a progress bar. Cancel takes effect
 at the next frame boundary.
 

@@ -111,13 +111,29 @@ class Session(QObject):
 
     # -------------------------------------------------------- invalidation
     def invalidate_from(self, stage: Stage):
-        """Drop this stage's result and every later one."""
+        """Drop this stage's result and every later one.
+
+        Returns whether anything was actually dropped.
+        """
         changed = False
         for s in Stage:
             if s >= stage and self._results.get(s) is not None:
                 self._results[s] = None
                 changed = True
         if changed:
+            self.dirty = True
+            self.stageChanged.emit(int(stage))
+        return changed
+
+    def note_settings(self, stage: Stage):
+        """A setting changed: drop later results, and say so either way.
+
+        invalidate_from stays quiet when there was nothing to drop, which is
+        the usual case before the first solve. The tabs that display a
+        setting chosen elsewhere then never heard about it, so the Motion tab
+        went on reporting the old unwrapping while solving with the new.
+        """
+        if not self.invalidate_from(stage):
             self.dirty = True
             self.stageChanged.emit(int(stage))
 

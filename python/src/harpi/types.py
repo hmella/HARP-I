@@ -213,3 +213,6 @@ class SegmentStrain:
     """``(n_segments, frames)``."""
     RR: np.ndarray | None = None
     n_segments: int = 6
+    geometry: dict = field(default_factory=dict)
+    """The angular layout the wedges were cut with, from
+    :func:`~harpi.analysis.segment_geometry`."""

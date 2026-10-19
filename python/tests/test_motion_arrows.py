@@ -149,3 +149,103 @@ def test_the_two_components_are_not_interchanged(qapp):
     U, V, _, _ = _arrows(_tab_with(_translation(3.0, 0.0), qapp))
     assert np.nanmax(np.abs(V)) < 1e-9
     assert np.nanmax(np.abs(U)) > 1.0
+
+
+# ------------------------------------------- the tagged image underneath
+
+def _with_dataset(u, qapp, on=True):
+    """A Motion tab whose session also holds an image to draw under."""
+    from harpi import Dataset2D
+
+    tab = _tab_with(u, qapp)
+    nfr = u.shape[-1]
+    rng = np.random.default_rng(0)
+    tab.session.dataset = Dataset2D(
+        image=rng.normal(size=(ROWS, COLS, 2, nfr)),
+        mask=np.ones((ROWS, COLS, nfr), bool),
+        pixel_size=[2.0, 2.0], tag_spacing=8.0)
+    tab.bg.active.setChecked(on)
+    tab.refresh()
+    return tab
+
+
+def _images(tab):
+    """The background layers only. The data is drawn with imshow too, so the
+    two are told apart by the z order the tab gives them."""
+    from matplotlib.image import AxesImage
+
+    return [(ax, im) for ax in tab.plot.fig.axes
+            for im in ax.images
+            if isinstance(im, AxesImage) and im.get_zorder() == 0]
+
+
+def _panels(tab):
+    """The two data panels, leaving out the colour bar."""
+    _, arrows = _quiver(tab)
+    maps = [ax for ax in tab.plot.fig.axes
+            if ax.get_title().startswith("|u|")]
+    return maps + [arrows]
+
+
+def test_the_overlay_is_on_by_default(qapp):
+    tab = _tab_with(_radial(), qapp)
+    assert tab.bg.active.isChecked()
+
+
+def test_the_image_is_drawn_under_both_panels(qapp):
+    tab = _with_dataset(_radial(), qapp)
+    axes = {ax for ax, _ in _images(tab)}
+    _, ax_arrows = _quiver(tab)
+    assert ax_arrows in axes, "nothing under the arrows"
+    assert len(axes) >= 2, "the magnitude panel too"
+
+
+def test_turning_it_off_leaves_the_arrows_alone(qapp):
+    tab = _with_dataset(_radial(), qapp, on=False)
+    _, ax_arrows = _quiver(tab)
+    assert not [im for ax, im in _images(tab) if ax is ax_arrows]
+
+
+def test_the_arrows_keep_their_direction_over_an_image(qapp):
+    """imshow orients rows downwards by itself, so inverting as well would
+    flip them a second time."""
+    u = _translation(0.0, 3.0)
+    U, V, _, _ = _arrows(_with_dataset(u, qapp))
+    good = np.isfinite(V) & (np.abs(V) > 1e-9)
+    assert good.any()
+    assert np.all(V[good] > 0)
+
+
+def test_a_contraction_still_points_inwards_over_an_image(qapp):
+    u, v, off, _ = _arrows(_with_dataset(_radial(scale=-0.25), qapp))
+    good = np.isfinite(u) & np.isfinite(v) & (np.hypot(u, v) > 1e-9)
+    px, py = off[:, 0], off[:, 1]
+    cx, cy = px[good].mean(), py[good].mean()
+    inward = -((px - cx) * u + (py - cy) * v)
+    assert np.all(inward[good] > 0)
+
+
+def test_both_panels_keep_rows_increasing_downwards(qapp):
+    for on in (True, False):
+        tab = _with_dataset(_radial(), qapp, on=on)
+        for ax in _panels(tab):
+            lo, hi = ax.get_ylim()
+            assert lo > hi, f"overlay={on}: row 0 is not at the top"
+
+
+def test_the_image_shares_the_crop_with_the_data(qapp):
+    """Otherwise the overlay sits off the anatomy it is meant to describe."""
+    tab = _with_dataset(_radial(), qapp)
+    _, ax_arrows = _quiver(tab)
+    under = [im for ax, im in _images(tab) if ax is ax_arrows][0]
+    x0, x1, y0, y1 = under.get_extent()
+    assert (x1 - x0, y0 - y1) == pytest.approx(
+        (ax_arrows.get_xlim()[1] - ax_arrows.get_xlim()[0],
+         ax_arrows.get_ylim()[0] - ax_arrows.get_ylim()[1]))
+
+
+def test_no_dataset_means_no_background(qapp):
+    """The tab has to keep working before any image is loaded."""
+    tab = _tab_with(_radial(), qapp)
+    assert tab.session.dataset is None
+    assert not _images(tab)

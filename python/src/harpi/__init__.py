@@ -41,7 +41,8 @@ from .motion import estimate_motion_2d, estimate_motion_3d, flip_components
 from .rbf import KERNELS, RBFKernel, get_kernel
 from .segmentation import Contour, contours_to_mask
 from .smoothing import smooth_reference_phase
-from .analysis import (aha_labels, bullseye_rings, segment_metrics,
+from .analysis import (aha_labels, bullseye_rings, expected_septal_arc,
+                       segment_geometry, segment_index, segment_metrics,
                        segment_table)
 from .strain import pixel_strain_2d, pixel_strain_3d, strain_by_segments
 from .tracking import track_points_2d
@@ -72,5 +73,6 @@ __all__ = [
     "track_points_2d",
     # regional analysis
     "aha_labels", "segment_metrics", "bullseye_rings", "segment_table",
+    "segment_geometry", "segment_index", "expected_septal_arc",
     "Contour", "contours_to_mask",
 ]

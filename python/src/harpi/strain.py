@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .analysis import segment_geometry, segment_index
 from .types import SegmentStrain, StrainResult
 
 __all__ = ["pixel_strain_2d", "pixel_strain_3d", "strain_by_segments"]
@@ -239,13 +240,31 @@ def pixel_strain_3d(u, mask, origin=None, times=None):
                         meta={"times": np.asarray(times)})
 
 
-def strain_by_segments(strain, n_segments=6, clockwise=False, origin=None,
-                       position_a=None, position_b=None, outlier_threshold=0.5):
+def strain_by_segments(strain, n_segments=6, clockwise=False, origin=None, *,
+                       anterior=None, inferior=None, outlier_threshold=0.5,
+                       position_a=None, position_b=None):
     """Average strain over equiangular segments.
 
     The angular wedge is intersected with the mask and ``theta`` is wrapped
     into the rotated frame, so every pixel falls in exactly one segment.
+
+    ``anterior`` and ``inferior`` are the right-ventricular insertion points as
+    ``(x, y)``. The anterior one is the boundary between segment 1 and segment
+    2 and the two together fix the direction; see
+    :func:`~harpi.analysis.segment_geometry`, which holds the layout.
+
+    ``position_a`` and ``position_b`` are the MATLAB spelling of the anterior
+    point, its x and its y, kept so existing callers keep working.
+
+    The layout no longer reads 1:1 against ``getStrainBySegments.m``. That
+    function numbers from half a turn away, which put every AHA name on the
+    wrong wall once this package started attaching them. The MATLAB regression
+    stops at ``pixelstrain``, so the numbering is not pinned by it.
     """
+    if anterior is not None and (position_a is not None
+                                 or position_b is not None):
+        raise ValueError("pass anterior=(x, y) or the MATLAB "
+                         "position_a/position_b, not both")
     mask = np.asarray(strain.mask, dtype=bool)
     isz = mask.shape
     if mask.ndim != 2:
@@ -264,19 +283,15 @@ def strain_by_segments(strain, n_segments=6, clockwise=False, origin=None,
     if origin is None or not np.all(np.isfinite(origin)):
         origin = (float(Xg[mask].mean()), float(Yg[mask].mean()))
 
-    if position_a is None:
-        position_a = float(Xg.max())
-    if position_b is None:
-        position_b = float(origin[1])
-    angle0 = np.arctan2(position_b - origin[1], position_a - origin[0])
+    if anterior is None and (position_a is not None or position_b is not None):
+        anterior = (float(Xg.max()) if position_a is None else position_a,
+                    float(origin[1]) if position_b is None else position_b)
 
+    geometry = segment_geometry(n_segments=n_segments, origin=origin,
+                                anterior=anterior, inferior=inferior,
+                                clockwise=clockwise)
     theta = np.arctan2(Yg - origin[1], Xg - origin[0])
-    theta = np.mod(theta - angle0 + np.pi, 2 * np.pi) - np.pi
-
-    edges = np.linspace(0, 2 * np.pi, n_segments + 1)
-    if not clockwise:
-        edges = edges[::-1]
-    edges = edges - np.pi
+    index = segment_index(theta, geometry)
 
     nfr = None
     for comp in ("CC", "RR"):
@@ -294,8 +309,7 @@ def strain_by_segments(strain, n_segments=6, clockwise=False, origin=None,
             curves[comp] = np.full((n_segments, nfr), np.nan)
 
     for seg in range(n_segments):
-        lo, hi = edges[seg], edges[seg + 1]
-        pos = (theta > hi) & (theta <= lo) if lo > hi else (theta > lo) & (theta <= hi)
+        pos = index == seg + 1
         segments[pos] = seg + 1
         inseg = pos & mask
         for comp in ("CC", "RR"):
@@ -312,4 +326,4 @@ def strain_by_segments(strain, n_segments=6, clockwise=False, origin=None,
 
     segments[~mask] = np.nan
     return SegmentStrain(segments=segments, CC=curves["CC"], RR=curves["RR"],
-                         n_segments=n_segments)
+                         n_segments=n_segments, geometry=geometry)

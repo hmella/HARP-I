@@ -5,10 +5,15 @@ equiangular wedges. What it does not do is name those wedges, or reduce the
 curves to the few numbers a report needs. Both are added here, kept free of Qt
 so they can be tested and scripted.
 
-Segment numbering follows ``strain_by_segments``: segment 1 begins at the
-reference angle fixed by ``position_a`` and ``position_b``, and the rest follow
-in the chosen direction. For the labels below to mean what they say, that
-reference angle has to be the anterior right-ventricular insertion point.
+The angular layout lives here too, beside the names, because the numbering only
+means anything through the names: when the two were in separate files they
+disagreed, and every label sat on the wrong wall.
+
+The anterior right-ventricular insertion separates the septum from the anterior
+wall, so it is the boundary between segment 1 and segment 2, and segment 1
+occupies the step before it. The wedges stay equiangular, 60 degrees for six
+and 90 for four, as the AHA statement specifies: the insertions orient the
+model, they do not stretch it.
 """
 
 from __future__ import annotations
@@ -16,7 +21,9 @@ from __future__ import annotations
 import numpy as np
 
 __all__ = ["AHA_LEVELS", "aha_labels", "segment_metrics", "bullseye_rings",
-           "segment_table"]
+           "segment_table", "segment_geometry", "segment_index",
+           "short_labels",
+           "expected_septal_arc"]
 
 
 # The AHA 17-segment model, in the order segments are numbered starting from the
@@ -31,6 +38,132 @@ AHA_LEVELS: dict[str, tuple[str, ...]] = {
 }
 
 NATIVE_SEGMENTS: dict[str, int] = {"basal": 6, "mid": 6, "apical": 4}
+
+# How many of those segments the septum occupies, which is what the two
+# insertion points should span if the heart matched the model exactly.
+AHA_SEPTAL_SEGMENTS: dict[str, int] = {"basal": 2, "mid": 2, "apical": 1}
+
+# Below this the two insertions are too close, or too nearly opposite, to say
+# which way round the septum runs.
+_DEGENERATE = np.radians(5.0)
+
+
+def _wrap(angle):
+    """Fold an angle into (-pi, pi]."""
+    return np.angle(np.exp(1j * np.asarray(angle, dtype=float)))
+
+
+def expected_septal_arc(level, n_segments):
+    """How wide the septum should be, in radians, or None.
+
+    None when the level is unknown or the segment count does not match the
+    model for it, since then there is nothing to compare a measurement with.
+    """
+    if level is None:
+        return None
+    key = str(level).lower()
+    if NATIVE_SEGMENTS.get(key) != n_segments:
+        return None
+    return AHA_SEPTAL_SEGMENTS[key] * 2 * np.pi / n_segments
+
+
+def _angle_to(origin, point):
+    """Angle of a point seen from the origin, or None if there is no ray."""
+    if point is None:
+        return None
+    x, y = float(point[0]), float(point[1])
+    if not (np.isfinite(x) and np.isfinite(y)):
+        return None
+    dx, dy = x - float(origin[0]), y - float(origin[1])
+    if np.hypot(dx, dy) < 1e-9:
+        return None
+    return float(np.arctan2(dy, dx))
+
+
+def segment_geometry(n_segments=6, origin=(0.0, 0.0), anterior=None,
+                     inferior=None, clockwise=False):
+    """Where the segment boundaries fall and which way the numbering runs.
+
+    ``anterior`` and ``inferior`` are the right-ventricular insertion points as
+    ``(x, y)``, in the same grid as ``origin``. The anterior one fixes the
+    boundary between segment 1 and segment 2. The two together fix the
+    direction: the septum is the shorter arc between them, so going from
+    anterior to inferior through it is the direction of increasing segment
+    number, and ``clockwise`` is only consulted when that cannot be read.
+
+    Returns a dict. ``direction`` is +1 when the segment number increases with
+    the angle and -1 when it decreases, ``septal_arc`` is what the two points
+    actually span, and ``direction_from`` says which rule decided.
+    """
+    step = 2 * np.pi / int(n_segments)
+    theta_ant = _angle_to(origin, anterior)
+    theta_inf = _angle_to(origin, inferior)
+
+    # with no anterior point the ray runs along +x, which is what the MATLAB
+    # defaults of position_a and position_b produce
+    anterior_angle = 0.0 if theta_ant is None else theta_ant
+
+    septal_arc = None
+    if theta_ant is not None and theta_inf is not None:
+        gap = _wrap(theta_inf - theta_ant)
+        septal_arc = abs(float(gap))
+        if _DEGENERATE < septal_arc < np.pi - _DEGENERATE:
+            direction = 1 if gap > 0 else -1
+            return {"anterior_angle": anterior_angle, "direction": direction,
+                    "step": step, "edges": _edges(anterior_angle, direction,
+                                                  step, n_segments),
+                    "septal_arc": septal_arc, "direction_from": "insertions",
+                    "origin": tuple(origin), "anterior": anterior,
+                    "inferior": inferior}
+
+    direction = 1 if clockwise else -1
+    return {"anterior_angle": anterior_angle, "direction": direction,
+            "step": step,
+            "edges": _edges(anterior_angle, direction, step, n_segments),
+            "septal_arc": septal_arc, "direction_from": "clockwise flag",
+            "origin": tuple(origin), "anterior": anterior,
+            "inferior": inferior}
+
+
+def _edges(anterior_angle, direction, step, n_segments):
+    """Boundary angles, starting at the one that opens segment 1."""
+    first = anterior_angle - direction * step
+    return np.array([_wrap(first + direction * step * k)
+                     for k in range(int(n_segments) + 1)])
+
+
+def segment_index(theta, geometry):
+    """1-based wedge index for each angle in ``theta``.
+
+    The ``+ step`` is what puts the anterior ray on the boundary between
+    segment 1 and segment 2 rather than at the start of segment 1.
+    """
+    step = geometry["step"]
+    phi = np.mod(geometry["direction"]
+                 * (np.asarray(theta, dtype=float) - geometry["anterior_angle"])
+                 + step, 2 * np.pi)
+    index = np.floor(phi / step).astype(int) + 1
+    # an angle landing exactly on 2*pi after the modulo would overflow
+    return np.clip(index, 1, int(round(2 * np.pi / step)))
+
+
+# Short forms for a crowded axis. Truncating the names instead turns both
+# anteroseptal and anterolateral into "antero".
+WALL_ABBREVIATIONS: dict[str, str] = {
+    "anterior": "ant", "anteroseptal": "ant-sept",
+    "inferoseptal": "inf-sept", "inferior": "inf",
+    "inferolateral": "inf-lat", "anterolateral": "ant-lat",
+    "septal": "sept", "lateral": "lat",
+}
+
+
+def short_labels(level: str | None, n_segments: int) -> list[str]:
+    """Names short enough for a bullseye axis, numbers when there are none."""
+    out = []
+    for name in aha_labels(level, n_segments):
+        wall = name.split()[-1]
+        out.append(WALL_ABBREVIATIONS.get(wall, wall))
+    return out
 
 
 def aha_labels(level: str | None, n_segments: int) -> list[str]:

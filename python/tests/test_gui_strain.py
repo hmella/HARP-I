@@ -87,8 +87,8 @@ def test_an_insertion_point_rotates_the_segments(tab):
     tab.run()
     before = tab.session.result(Stage.STRAIN)["segments"].segments.copy()
     tab.ins_auto.setChecked(False)
-    tab.ins_x.setValue(24.0)
-    tab.ins_y.setValue(8.0)
+    tab.ins_ant_x.setValue(24.0)
+    tab.ins_ant_y.setValue(8.0)
     tab.run()
     after = tab.session.result(Stage.STRAIN)["segments"].segments
     both = np.isfinite(before) & np.isfinite(after)
@@ -98,7 +98,7 @@ def test_an_insertion_point_rotates_the_segments(tab):
 def test_clicking_the_map_sets_the_picked_point(tab):
     tab.run()
     tab.ins_auto.setChecked(False)
-    tab._set_pick("insertion", True)
+    tab._set_pick("anterior", True)
 
     class Event:
         inaxes = tab.plot.fig.axes[0]
@@ -107,30 +107,30 @@ def test_clicking_the_map_sets_the_picked_point(tab):
     tab._clicked(Event())
     r0, c0 = tab._crop
     # the library grid is 1-based and the panel shows a crop
-    assert tab.ins_x.value() == pytest.approx(c0 + 5.0 + 1.0)
-    assert tab.ins_y.value() == pytest.approx(r0 + 6.0 + 1.0)
-    assert not tab.pick_ins.isChecked()
+    assert tab.ins_ant_x.value() == pytest.approx(c0 + 5.0 + 1.0)
+    assert tab.ins_ant_y.value() == pytest.approx(r0 + 6.0 + 1.0)
+    assert not tab.pick_ant.isChecked()
 
 
 def test_picking_one_point_cancels_the_other(tab):
     tab.origin_auto.setChecked(False)
     tab.ins_auto.setChecked(False)
     tab.pick_origin.setChecked(True)
-    tab.pick_ins.setChecked(True)
+    tab.pick_ant.setChecked(True)
     assert not tab.pick_origin.isChecked()
 
 
 def test_a_click_is_ignored_when_no_pick_is_armed(tab):
     tab.run()
     tab.ins_auto.setChecked(False)
-    before = tab.ins_x.value()
+    before = tab.ins_ant_x.value()
 
     class Event:
         inaxes = tab.plot.fig.axes[0]
         xdata, ydata = 5.0, 6.0
 
     tab._clicked(Event())
-    assert tab.ins_x.value() == before
+    assert tab.ins_ant_x.value() == before
 
 
 def test_the_outlier_threshold_is_forwarded(tab):
@@ -228,3 +228,274 @@ def test_changing_a_setting_warns_that_a_rerun_is_needed(tab):
 def test_refresh_without_a_result_is_harmless(tab):
     tab.refresh()
     assert tab.table.rowCount() == 0
+
+
+# ------------------------------------------------- arming the pick buttons
+
+def test_arming_the_second_picker_keeps_the_mode(tab):
+    """Un-checking the first button lands back in _set_pick, which used to
+    clear the mode just set: the button stayed lit and the click went
+    nowhere."""
+    tab.origin_auto.setChecked(False)
+    tab.ins_auto.setChecked(False)
+    tab.pick_origin.setChecked(True)
+    assert tab._pick == "origin"
+    tab.pick_ant.setChecked(True)
+    assert tab._pick == "anterior", "the mode was cleared by the un-check"
+    assert tab.pick_ant.isChecked()
+    assert not tab.pick_origin.isChecked()
+
+
+def test_a_click_after_switching_pickers_lands(tab):
+    """The symptom of the bug above, from the user's side."""
+    tab.run()
+    tab.origin_auto.setChecked(False)
+    tab.ins_auto.setChecked(False)
+    tab.pick_origin.setChecked(True)
+    tab.pick_ant.setChecked(True)
+
+    class Event:
+        inaxes = tab.plot.fig.axes[0]
+        xdata, ydata = 5.0, 6.0
+
+    tab._clicked(Event())
+    r0, c0 = tab._crop
+    assert tab.ins_ant_x.value() == pytest.approx(c0 + 6.0)
+    assert tab.ins_ant_y.value() == pytest.approx(r0 + 7.0)
+
+
+def test_un_toggling_a_picker_disarms_it(tab):
+    tab.origin_auto.setChecked(False)
+    tab.pick_origin.setChecked(True)
+    tab.pick_origin.setChecked(False)
+    assert tab._pick is None
+
+
+def test_the_banner_names_the_point_that_was_set(tab):
+    """It read 'None set to (6.0, 7.0)' because the mode was cleared first."""
+    tab.run()
+    tab.ins_auto.setChecked(False)
+    tab.pick_ant.setChecked(True)
+
+    class Event:
+        inaxes = tab.plot.fig.axes[0]
+        xdata, ydata = 5.0, 6.0
+
+    tab._clicked(Event())
+    assert "None" not in tab.banner.text(), tab.banner.text()
+    assert "anterior" in tab.banner.text()
+
+
+def test_a_click_outside_the_map_is_ignored(tab):
+    """The curves would hand over a time, the bullseye an angle."""
+    tab.run()
+    tab.ins_auto.setChecked(False)
+    tab.pick_ant.setChecked(True)
+    before = (tab.ins_ant_x.value(), tab.ins_ant_y.value())
+
+    class Event:
+        inaxes = tab.plot.fig.axes[1]
+        xdata, ydata = 5.0, 6.0
+
+    tab._clicked(Event())
+    assert (tab.ins_ant_x.value(), tab.ins_ant_y.value()) == before
+    assert tab._pick == "anterior", "still armed, waiting for the map"
+
+
+# ------------------------------------------------- the two insertion points
+
+def _place_both(tab, anterior=(24.0, 8.0), inferior=(8.0, 32.0)):
+    tab.ins_auto.setChecked(False)
+    tab.ins_ant_x.setValue(anterior[0]); tab.ins_ant_y.setValue(anterior[1])
+    tab.ins_inf_x.setValue(inferior[0]); tab.ins_inf_y.setValue(inferior[1])
+
+
+def test_both_points_reach_the_library(tab):
+    seen = {}
+    real = tabs_motion.strain_by_segments
+
+    def spy(*a, **kw):
+        seen.update(kw)
+        return real(*a, **kw)
+
+    _place_both(tab)
+    with mock.patch.object(tabs_motion, "strain_by_segments", spy):
+        tab.run()
+    assert seen["anterior"] == (24.0, 8.0)
+    assert seen["inferior"] == (8.0, 32.0)
+
+
+def test_the_inferior_point_is_optional(tab):
+    """Leaving it unplaced keeps the single-point behaviour."""
+    seen = {}
+    real = tabs_motion.strain_by_segments
+
+    def spy(*a, **kw):
+        seen.update(kw)
+        return real(*a, **kw)
+
+    tab.ins_auto.setChecked(False)
+    tab.ins_ant_x.setValue(24.0); tab.ins_ant_y.setValue(8.0)
+    with mock.patch.object(tabs_motion, "strain_by_segments", spy):
+        tab.run()
+    assert seen["anterior"] == (24.0, 8.0)
+    assert seen["inferior"] is None
+
+
+def test_the_two_points_decide_the_direction(tab):
+    _place_both(tab)
+    tab.run()
+    geom = tab.session.result(Stage.STRAIN)["segments"].geometry
+    assert geom["direction_from"] == "insertions"
+
+
+def test_the_clockwise_box_is_disabled_once_both_points_are_set(tab):
+    """It cannot do anything then, so it should not look as if it can."""
+    assert tab.clockwise.isEnabled()
+    _place_both(tab)
+    assert not tab.clockwise.isEnabled()
+    tab.ins_inf_x.setValue(0.0); tab.ins_inf_y.setValue(0.0)
+    assert tab.clockwise.isEnabled(), "one point again, so it applies"
+
+
+def test_the_septum_readout_reports_the_measured_arc(tab):
+    _place_both(tab)
+    tab.run()
+    text = tab.septum_lbl.text()
+    assert "deg between the insertions" in text
+    assert "120" in text, f"the model's arc should be named: {text}"
+
+
+def test_the_septum_readout_warns_when_the_points_look_swapped(tab):
+    """A departure that large usually means they are the wrong way round."""
+    _place_both(tab, anterior=(24.0, 8.0), inferior=(25.0, 9.0))
+    tab.run()
+    assert "Check which point is which" in tab.septum_lbl.text()
+
+
+def test_the_septum_readout_says_when_only_one_point_is_given(tab):
+    tab.ins_auto.setChecked(False)
+    tab.ins_ant_x.setValue(24.0); tab.ins_ant_y.setValue(8.0)
+    tab.run()
+    assert "clockwise" in tab.septum_lbl.text()
+
+
+def test_the_run_banner_carries_the_septum(tab):
+    _place_both(tab)
+    tab.run()
+    assert "Septum:" in tab.banner.text()
+
+
+def test_both_points_are_drawn_on_the_map(tab):
+    """With their rays, so the numbering can be checked by eye."""
+    _place_both(tab)
+    tab.run()
+    ax = tab.plot.fig.axes[0]
+    markers = [ln.get_marker() for ln in ax.lines]
+    assert "x" in markers, "the anterior point"
+    assert "*" in markers, "the inferior point"
+    styles = [ln.get_linestyle() for ln in ax.lines]
+    assert "--" in styles and ":" in styles, "the two rays"
+
+
+def test_the_settings_record_both_points(tab):
+    _place_both(tab)
+    tab.run()
+    s = tab.settings()
+    assert s["anterior insertion"] == (24.0, 8.0)
+    assert s["inferior insertion"] == (8.0, 32.0)
+    assert "deg" in s["septal arc"]
+
+
+def test_picking_the_inferior_point_cancels_the_others(tab):
+    tab.run()
+    tab.origin_auto.setChecked(False)
+    tab.ins_auto.setChecked(False)
+    tab.pick_origin.setChecked(True)
+    tab.pick_inf.setChecked(True)
+    assert tab._pick == "inferior"
+    assert not tab.pick_origin.isChecked() and not tab.pick_ant.isChecked()
+
+
+def test_clicking_sets_the_inferior_point(tab):
+    tab.run()
+    tab.ins_auto.setChecked(False)
+    tab.pick_inf.setChecked(True)
+
+    class Event:
+        inaxes = tab.plot.fig.axes[0]
+        xdata, ydata = 7.0, 9.0
+
+    tab._clicked(Event())
+    r0, c0 = tab._crop
+    assert tab.ins_inf_x.value() == pytest.approx(c0 + 8.0)
+    assert tab.ins_inf_y.value() == pytest.approx(r0 + 10.0)
+
+
+# -------------------------------------------- the tagged image underneath
+
+def _backgrounds(tab):
+    """Background layers only, told from the data by their z order."""
+    return [im for ax in tab.plot.fig.axes for im in ax.images
+            if im.get_zorder() == 0]
+
+
+def test_the_overlay_is_on_by_default(tab):
+    assert tab.bg.active.isChecked()
+
+
+def test_the_tab_works_without_a_dataset(tab):
+    """It is built from a mask and a motion result alone, which is how the
+    whole of this file drives it."""
+    assert tab.session.dataset is None
+    tab.run()
+    assert not _backgrounds(tab)
+    assert tab.session.result(Stage.STRAIN) is not None
+
+
+def _with_dataset(tab):
+    from harpi import Dataset2D
+
+    rows, cols, nfr = 48, 48, 6
+    rng = np.random.default_rng(0)
+    tab.session.dataset = Dataset2D(
+        image=rng.normal(size=(rows, cols, 2, nfr)),
+        mask=np.ones((rows, cols, nfr), bool),
+        pixel_size=[2.0, 2.0], tag_spacing=8.0)
+    return tab
+
+
+def test_the_image_goes_under_the_map_and_the_segments(tab):
+    _with_dataset(tab)
+    tab.run()
+    assert len(_backgrounds(tab)) >= 2, "the component map and the wedges"
+
+
+def test_turning_the_overlay_off_removes_it(tab):
+    _with_dataset(tab)
+    tab.bg.active.setChecked(False)
+    tab.run()
+    assert not _backgrounds(tab)
+
+
+def test_the_opacity_reaches_the_data_layer(tab):
+    _with_dataset(tab)
+    tab.bg.alpha.setValue(40)
+    tab.run()
+    data = [im for ax in tab.plot.fig.axes for im in ax.images
+            if im.get_zorder() == 1]
+    assert data
+    assert all(im.get_alpha() == pytest.approx(0.4) for im in data)
+
+
+def test_the_colour_bar_stays_solid(tab):
+    """It is built from a mappable, not from the faded image, or the scale
+    is as washed out as the data."""
+    _with_dataset(tab)
+    tab.bg.alpha.setValue(30)
+    tab.run()
+    bars = [ax for ax in tab.plot.fig.axes
+            if getattr(ax, "_colorbar", None) is not None]
+    assert bars
+    for ax in bars:
+        assert ax._colorbar.mappable.get_alpha() in (None, 1.0)

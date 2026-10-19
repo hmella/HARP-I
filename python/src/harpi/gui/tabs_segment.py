@@ -30,7 +30,8 @@ from ..segmentation import (WALLS, Contour, contours_to_mask,
 from ..unwrap import phase_quality_2d, unwrap2
 from .canvas import DeleteContourCommand, ImageCanvas, SetContoursCommand
 from .session import Stage
-from .widgets import StageBanner, nan_range
+from .widgets import (BACKGROUND_CHOICES, StageBanner, background_image,
+                      nan_range)
 
 
 class _Cancelled(Exception):
@@ -129,11 +130,8 @@ class SegmentTab(QWidget):
         # Which image to draw on. The harmonic magnitude is often easiest,
         # since the tag pattern is suppressed and the wall stands out.
         self.background = QComboBox()
-        self.background.addItem("Magnitude (raw)", "magnitude")
-        self.background.addItem("Magnitude (raw, encoding 2)", "magnitude2")
-        self.background.addItem("Harmonic magnitude (filtered)", "harmonic")
-        self.background.addItem("Harmonic phase 1", "phase1")
-        self.background.addItem("Harmonic phase 2", "phase2")
+        for label, key in BACKGROUND_CHOICES:
+            self.background.addItem(label, key)
         self.background.currentIndexChanged.connect(lambda _: self.refresh())
 
         self.draw_btn = QPushButton("Draw contour (Enter to finish)")
@@ -247,6 +245,13 @@ class SegmentTab(QWidget):
     def _delete_contour(self):
         ci = self.contour_list.currentRow()
         if ci < 0:
+            # _update_list clears the list on every refresh, so the selection
+            # is gone after a frame step or an edit and the button looked
+            # broken. Fall back to the last contour, which is the one just
+            # drawn.
+            ci = self.contour_list.count() - 1
+        if ci < 0:
+            self.banner.setText("No contour on this frame to delete.")
             return
         self.undo_stack.push(DeleteContourCommand(self.canvas, ci))
 
@@ -449,7 +454,9 @@ class SegmentTab(QWidget):
         if not changes:
             shut()
             QMessageBox.information(
-                self, "Track", "Nothing to do (tick 'overwrite existing'?).")
+                self, "Track",
+                "Every other frame already has contours. Tick "
+                "'overwrite existing' in the Propagate box to replace them.")
             return
 
         self.undo_stack.push(SetContoursCommand(self.canvas, changes, new_labels))
@@ -574,38 +581,22 @@ class SegmentTab(QWidget):
         self.prop_from.setMaximum(ds.n_frames)
         self.prop_to.setMaximum(ds.n_frames)
 
-        filt = self.session.result(Stage.FILTER)
-        mag = np.real(ds.image[:, :, 0, fr])
-
         # What the editable panel shows.
-        choice = self.background.currentData()
-        if choice not in ("magnitude", "magnitude2") and filt is None:
-            choice = "magnitude"
-            if self.background.currentIndex() != 0:
-                self.banner.setText("Run the filter first to draw on the harmonic image.")
-        if choice == "magnitude":
-            self.canvas.set_image(mag, *nan_range(mag))
-            self.title.setText("magnitude")
-        elif choice == "magnitude2":
-            second = np.real(ds.image[:, :, min(1, ds.image.shape[2] - 1), fr])
-            self.canvas.set_image(second, *nan_range(second))
-            self.title.setText("magnitude, encoding 2")
-        elif choice == "harmonic":
-            h = np.abs(filt["image"][:, :, 0, fr])
-            self.canvas.set_image(h, *nan_range(h))
-            self.title.setText("harmonic magnitude")
-        else:
-            d = 0 if choice == "phase1" else 1
-            pha = np.angle(filt["image"][:, :, d, fr])
-            self.canvas.set_image(pha, -np.pi, np.pi, cmap="twilight")
-            self.title.setText(f"harmonic phase {d + 1}")
+        wanted = self.background.currentData()
+        bg = background_image(ds, self.session.result(Stage.FILTER), wanted,
+                              fr, self.session.current_slice)
+        if bg.choice != wanted:
+            self.banner.setText(
+                "Run the filter first to draw on the harmonic image.")
+        self.canvas.set_image(bg.array, bg.vmin, bg.vmax, cmap=bg.cmap)
+        self.title.setText(bg.title)
 
         m = self.session.mask
         overlay = m[:, :, fr] if m is not None else None
         for c in self.canvases:
             c.set_mask_overlay(overlay)
             c.refresh()
-            c.fit()
+            c.fit(force=False)
         self._update_list()
 
 
@@ -674,7 +665,7 @@ class UnwrapTab(QWidget):
     # ----------------------------------------------------------- settings
     def _settings_changed(self, *_):
         self.session.unwrap["connectivity"] = int(self.connectivity.currentText())
-        self.session.invalidate_from(Stage.MOTION)
+        self.session.note_settings(Stage.MOTION)
 
     def _seed_mode(self, text):
         chosen = text == "chosen point"
@@ -685,7 +676,7 @@ class UnwrapTab(QWidget):
             self.pick_seed.setChecked(False)
         elif self.session.unwrap["seed"] == "auto":
             self.seed_lbl.setText("click the quality map")
-        self.session.invalidate_from(Stage.MOTION)
+        self.session.note_settings(Stage.MOTION)
 
     def _seed_picked(self, x, y):
         """A seed is a (row, col) index, so the scene point is rounded to one."""
@@ -695,7 +686,7 @@ class UnwrapTab(QWidget):
         self.session.unwrap["seed"] = (row, col)
         self.seed_lbl.setText(f"row {row}, column {col}")
         self.pick_seed.setChecked(False)
-        self.session.invalidate_from(Stage.MOTION)
+        self.session.note_settings(Stage.MOTION)
 
     def run(self):
         filt = self.session.result(Stage.FILTER)
@@ -783,9 +774,9 @@ class UnwrapTab(QWidget):
         q = res["quality"][fr]
         if q is not None:
             self.qual.set_image(q, 0, 1)
-            self.qual.fit()
+            self.qual.fit(force=False)
         ph = res["phase"][fr]
         if ph is not None:
             for c, p in ((self.u1, ph[0]), (self.u2, ph[1])):
                 c.set_image(p, *nan_range(p))
-                c.fit()
+                c.fit(force=False)

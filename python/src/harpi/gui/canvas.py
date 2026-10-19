@@ -212,6 +212,11 @@ class ImageCanvas(QGraphicsView):
         self.setMouseTracking(True)
         self._drag = None
         self._show_mask = True
+        self._mask = None          # the last overlay, so it can be put back
+        # Only an editable canvas pushes commands, and whoever makes one
+        # editable sets this. Declared so a new editable canvas fails here
+        # rather than on the first right click.
+        self.undo_stack = None
         self._user_zoomed = False
         self.markers_draggable = False
         self._markers = []
@@ -245,6 +250,8 @@ class ImageCanvas(QGraphicsView):
             self._user_zoomed = False
 
     def set_mask_overlay(self, mask):
+        # kept, so toggling can put it back without the tab redrawing
+        self._mask = None if mask is None else np.asarray(mask, dtype=bool)
         if mask is None or not self._show_mask:
             self._overlay.setPixmap(QPixmap())
             return
@@ -257,10 +264,26 @@ class ImageCanvas(QGraphicsView):
         self._overlay.setPixmap(QPixmap.fromImage(img))
 
     def toggle_mask(self):
+        """Show or hide the mask overlay.
+
+        refresh() rebuilds the contours and never touches the overlay, so
+        flipping the flag alone did nothing until some other event happened
+        to redraw, which made the shortcut look random.
+        """
         self._show_mask = not self._show_mask
+        self.set_mask_overlay(self._mask)
         self.refresh()
 
-    def fit(self):
+    def fit(self, force=True):
+        """Frame the whole image.
+
+        ``force`` is False for the refits a tab does as a matter of course,
+        after an edit or a frame step. Those used to clear _user_zoomed, so
+        zooming in to place a node accurately was undone the moment the node
+        was released. The F shortcut and a new image still force it.
+        """
+        if not force and self._user_zoomed:
+            return
         if not self.scene().sceneRect().isEmpty():
             self.fitInView(self.scene().sceneRect(), Qt.KeepAspectRatio)
             self._user_zoomed = False

@@ -95,7 +95,14 @@ class DataTab(QWidget):
         form.addRow("", self.link_size)
         form.addRow("pixel size, rows", self.pixel_size)
         form.addRow("pixel size, columns", self.pixel_size_col)
-        form.addRow("slice thickness", self.pixel_size_slice)
+        # The interface takes 2-D studies only, which _adopt enforces before
+        # session.dataset is ever set, so this can never be enabled. It is
+        # kept, hidden, because the library and _params_edited still handle a
+        # volume and the row would be wanted again the day the tab does.
+        self.slice_row = QLabel("slice thickness")
+        form.addRow(self.slice_row, self.pixel_size_slice)
+        self.slice_row.setVisible(False)
+        self.pixel_size_slice.setVisible(False)
         form.addRow("tag spacing", self.tag_spacing)
         form.addRow("frame interval", self.frame_interval)
         form.addRow("frame times", self.times_lbl)
@@ -278,6 +285,8 @@ class DataTab(QWidget):
         is_3d = self.session.dataset is not None and not hasattr(
             self.session.dataset, "pixel_size")
         self.pixel_size_slice.setEnabled(is_3d and not linked)
+        for w in (self.slice_row, self.pixel_size_slice):
+            w.setVisible(is_3d)
 
     def _link_changed(self, linked):
         """Follow the row spacing when the pixels are declared square."""
@@ -319,7 +328,7 @@ class DataTab(QWidget):
             img[:, :, min(self.session.current_slice, img.shape[2] - 1), 0, fr]
         lo, hi = nan_range(frame)
         self.canvas.set_image(np.real(frame), lo, hi)
-        self.canvas.fit()
+        self.canvas.fit(force=False)
 
 
 class FilterTab(QWidget):
@@ -598,7 +607,7 @@ class FilterTab(QWidget):
             self.k_before.set_mask_overlay(None)
 
         self._draw_markers()
-        self.k_before.fit()
+        self.k_before.fit(force=False)
 
         if res is None:
             self.k_after.set_image(np.zeros_like(k), 0, 1)
@@ -607,7 +616,7 @@ class FilterTab(QWidget):
         Ih = res["image"][:, :, enc, fr]
         kf = np.log1p(np.abs(itok(Ih)))
         self.k_after.set_image(kf, *nan_range(kf))
-        self.k_after.fit()
+        self.k_after.fit(force=False)
         m = np.abs(Ih)
         self.mag.set_image(m, *nan_range(m))
-        self.mag.fit()
+        self.mag.fit(force=False)

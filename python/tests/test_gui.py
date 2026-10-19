@@ -1157,3 +1157,66 @@ def test_clearing_a_frame_is_not_an_error(window, dataset):
     assert window.session.contours.get((0, 1)), "only this frame"
     st.undo_stack.undo()
     assert window.session.contours.get((0, 0))
+
+
+# ---------------------------------------------- what a project remembers
+
+def _saved(window, tmp_path, name="g.harpi"):
+    """Save, then load into a fresh window, as reopening does."""
+    from harpi.gui.app import MainWindow
+
+    p = tmp_path / name
+    window.session.project_path = str(p)
+    window.save_project()
+    w2 = MainWindow()
+    w2.load_project(p)
+    return w2
+
+
+def test_a_project_keeps_the_strain_geometry(window, tmp_path):
+    """None of it was saved, so every reopen started from the defaults."""
+    st = window.strain_tab
+    st.origin_auto.setChecked(False)
+    st.origin_x.setValue(23.5); st.origin_y.setValue(24.5)
+    st.ins_auto.setChecked(False)
+    st.ins_ant_x.setValue(16.0); st.ins_ant_y.setValue(10.0)
+    st.ins_inf_x.setValue(10.0); st.ins_inf_y.setValue(34.0)
+    st.level.setCurrentText("basal")
+
+    back = _saved(window, tmp_path).strain_tab
+    assert not back.origin_auto.isChecked()
+    assert (back.origin_x.value(), back.origin_y.value()) == (23.5, 24.5)
+    assert (back.ins_ant_x.value(), back.ins_ant_y.value()) == (16.0, 10.0)
+    assert (back.ins_inf_x.value(), back.ins_inf_y.value()) == (10.0, 34.0)
+    assert back.level.currentText() == "basal"
+
+
+def test_a_project_without_a_saved_geometry_keeps_the_defaults(window,
+                                                               tmp_path):
+    """Every project written before this existed, which must not be read as
+    a deliberate choice of anything."""
+    from harpi.io import HarpiProject
+    from harpi.gui.app import MainWindow
+
+    p = HarpiProject(config={"segment": {"mask_origin": 0.5}})
+    f = p.save(tmp_path / "old.harpi")
+    w2 = MainWindow()
+    w2.load_project(f)
+    assert w2.strain_tab.ins_auto.isChecked()
+    assert w2.strain_tab.origin_auto.isChecked()
+
+
+def test_a_loaded_mask_survives_a_resolution_change(window, tmp_path):
+    """The mask was saved but its source was not, so it read as drawn from
+    contours and the next rebuild threw it away. Nudging contour resolution
+    after opening a project destroyed it."""
+    window.segment_tab._load_mask_from_dataset()
+    assert window.session.mask is not None
+
+    w2 = _saved(window, tmp_path, "m.harpi")
+    assert w2.session.mask is not None, "the mask did not survive the load"
+    assert w2.session.mask_source == "file"
+
+    st = w2.segment_tab
+    st.resolution.setValue(st.resolution.value() - 0.1)
+    assert w2.session.mask is not None, "wiped by the resolution change"

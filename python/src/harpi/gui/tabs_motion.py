@@ -38,13 +38,33 @@ from .. import (
     segment_table,
     strain_by_segments,
 )
-from ..analysis import NATIVE_SEGMENTS
+from ..analysis import (NATIVE_SEGMENTS, expected_septal_arc,
+                        short_labels)
 from .session import Stage
 from .snapshots import Snapshot
-from .widgets import MplCanvas, StageBanner, mask_bbox, nan_range
+from .widgets import (BackgroundControls, MplCanvas, StageBanner,
+                      background_image, mask_bbox, nan_range)
 from .worker import run_in_background
 
 __all__ = ["MotionTab", "StrainTab"]
+
+
+def draw_background(ax, controls, session, frame, box):
+    """Put the tagged image under a map, and say whether one was drawn.
+
+    The data layer keeps its NaN outside the mask, which matplotlib renders
+    transparent, so the anatomy shows through the holes with no masking work.
+    """
+    if not controls.wanted():
+        return False
+    bg = background_image(session.dataset, session.result(Stage.FILTER),
+                          controls.choice(), frame, session.current_slice)
+    if bg is None:
+        return False
+    r0, r1, c0, c1 = box
+    ax.imshow(bg.array[r0:r1, c0:c1], cmap=bg.cmap or "gray",
+              vmin=bg.vmin, vmax=bg.vmax, zorder=0)
+    return True
 
 _REGION_NAMES = {"lv": "left ventricle", "rv": "right ventricle",
                  "other": "other"}
@@ -156,10 +176,14 @@ class MotionTab(QWidget):
 
         side = QVBoxLayout()
         side.addWidget(box)
+        self.bg = BackgroundControls()
+        self.bg.changed.connect(self.refresh)
+
         side.addWidget(self.run_btn)
         side.addWidget(self.cancel_btn)
         side.addWidget(self.progress)
         side.addWidget(self.flip_box)
+        side.addWidget(self.bg)
         side.addWidget(QLabel("phase jumps (x2π), per frame:"))
         side.addWidget(self.jump_lbl)
         side.addWidget(self.banner)
@@ -359,10 +383,13 @@ class MotionTab(QWidget):
         crop = mag[r0:r1, c0:c1]
 
         ax = self.plot.axes(1, 2, 1)
-        im = ax.imshow(crop, cmap="magma")
+        draw_background(ax, self.bg, self.session, fr, (r0, r1, c0, c1))
+        im = ax.imshow(crop, cmap="magma", alpha=self.bg.opacity(), zorder=1)
         ax.set_title(f"|u| frame {fr + 1}")
         ax.axis("off")
-        self.plot.fig.colorbar(im, ax=ax, shrink=0.8, label="px")
+        # from a mappable rather than the faded image, so the bar stays solid
+        bar = ScalarMappable(norm=Normalize(*im.get_clim()), cmap="magma")
+        self.plot.fig.colorbar(bar, ax=ax, shrink=0.8, label="px")
 
         ax2 = self.plot.axes(1, 2, 2)
         ux = u[r0:r1, c0:c1, 0, fr]
@@ -373,9 +400,19 @@ class MotionTab(QWidget):
         # makes the drawn y axis increase downwards to match them. Negating it
         # as well flipped the arrows a second time, so a contraction fanned
         # outwards top and bottom while converging left and right.
+        draw_background(ax2, self.bg, self.session, fr, (r0, r1, c0, c1))
+        # the arrows stay solid: they are line art covering almost no area,
+        # and the image is already visible between them
         ax2.quiver(xs, ys, ux[::step, ::step], uy[::step, ::step],
-                   color="#3a7fe8", scale_units="xy", angles="xy", scale=0.4)
-        ax2.set_aspect("equal"); ax2.invert_yaxis(); ax2.axis("off")
+                   color="#3a7fe8", scale_units="xy", angles="xy", scale=0.4,
+                   zorder=2)
+        ax2.set_aspect("equal")
+        # Set the limits rather than inverting them. imshow already puts row 0
+        # at the top, so a background image plus invert_yaxis would flip twice,
+        # and this holds whether or not one was drawn.
+        ax2.set_xlim(-0.5, crop.shape[1] - 0.5)
+        ax2.set_ylim(crop.shape[0] - 0.5, -0.5)
+        ax2.axis("off")
         ax2.set_title("displacement")
         self.plot.draw()
 
@@ -400,8 +437,10 @@ class StrainTab(QWidget):
     def __init__(self, session, parent=None):
         super().__init__(parent)
         self.session = session
-        self._pick = None          # None, "origin" or "insertion"
+        self._pick = None          # which point a click would set, or None
+        self._arming = False       # see _set_pick
         self._crop = (0, 0)        # row, col offset of the displayed crop
+        self._map_ax = None        # the panel a click is taken from
 
         # -------------------------------------------------- geometry
         self.origin_x = QDoubleSpinBox(); self.origin_x.setRange(0, 4096)
@@ -415,16 +454,37 @@ class StrainTab(QWidget):
         self.pick_origin.setCheckable(True)
         self.pick_origin.toggled.connect(lambda on: self._set_pick("origin", on))
 
-        self.ins_x = QDoubleSpinBox(); self.ins_x.setRange(0, 4096)
-        self.ins_y = QDoubleSpinBox(); self.ins_y.setRange(0, 4096)
-        for w in (self.ins_x, self.ins_y):
+        # The anterior insertion separates the septum from the anterior wall,
+        # so it is the boundary between segment 1 and segment 2. The inferior
+        # one closes the septum, and the two together say which way round the
+        # numbering runs.
+        self.ins_ant_x = QDoubleSpinBox(); self.ins_ant_x.setRange(0, 4096)
+        self.ins_ant_y = QDoubleSpinBox(); self.ins_ant_y.setRange(0, 4096)
+        self.ins_inf_x = QDoubleSpinBox(); self.ins_inf_x.setRange(0, 4096)
+        self.ins_inf_y = QDoubleSpinBox(); self.ins_inf_y.setRange(0, 4096)
+        for w in (self.ins_ant_x, self.ins_ant_y,
+                  self.ins_inf_x, self.ins_inf_y):
             w.setDecimals(1); w.setSingleStep(0.5)
         self.ins_auto = QCheckBox("default reference angle")
         self.ins_auto.setChecked(True)
         self.ins_auto.toggled.connect(self._ins_mode)
-        self.pick_ins = QPushButton("pick on the map")
-        self.pick_ins.setCheckable(True)
-        self.pick_ins.toggled.connect(lambda on: self._set_pick("insertion", on))
+        self.pick_ant = QPushButton("pick anterior on the map")
+        self.pick_ant.setCheckable(True)
+        self.pick_ant.toggled.connect(lambda on: self._set_pick("anterior", on))
+        self.pick_inf = QPushButton("pick inferior on the map")
+        self.pick_inf.setCheckable(True)
+        self.pick_inf.toggled.connect(lambda on: self._set_pick("inferior", on))
+        self.septum_lbl = QLabel("-")
+        self.septum_lbl.setWordWrap(True)
+        self.septum_lbl.setToolTip(
+            "What the two insertion points span, against what the model "
+            "expects. The wedges stay equal either way.")
+
+        # one entry per point that can be picked, so arming is not a set of
+        # hard-coded cases
+        self._pickers = {"origin": self.pick_origin,
+                         "anterior": self.pick_ant,
+                         "inferior": self.pick_inf}
 
         # -------------------------------------------------- segments
         self.region = QComboBox()
@@ -473,8 +533,12 @@ class StrainTab(QWidget):
         # a setting change only invalidates the analysis, not the motion fit,
         # so recomputing is cheap and the button stays enabled throughout
         for w in (self.nseg, self.outlier, self.origin_x, self.origin_y,
-                  self.ins_x, self.ins_y):
+                  self.ins_ant_x, self.ins_ant_y,
+                  self.ins_inf_x, self.ins_inf_y):
             w.valueChanged.connect(self._mark_stale)
+        for w in (self.ins_ant_x, self.ins_ant_y,
+                  self.ins_inf_x, self.ins_inf_y):
+            w.valueChanged.connect(self._sync_clockwise)
         for w in (self.clockwise, self.origin_auto, self.ins_auto):
             w.toggled.connect(self._mark_stale)
 
@@ -484,9 +548,13 @@ class StrainTab(QWidget):
         geo.addRow("centre y", self.origin_y)
         geo.addRow("", self.pick_origin)
         geo.addRow("", self.ins_auto)
-        geo.addRow("insertion x", self.ins_x)
-        geo.addRow("insertion y", self.ins_y)
-        geo.addRow("", self.pick_ins)
+        geo.addRow("anterior x", self.ins_ant_x)
+        geo.addRow("anterior y", self.ins_ant_y)
+        geo.addRow("", self.pick_ant)
+        geo.addRow("inferior x", self.ins_inf_x)
+        geo.addRow("inferior y", self.ins_inf_y)
+        geo.addRow("", self.pick_inf)
+        geo.addRow("septum", self.septum_lbl)
         geo_box = QGroupBox("Geometry"); geo_box.setLayout(geo)
 
         seg = QFormLayout()
@@ -512,9 +580,12 @@ class StrainTab(QWidget):
             "in the paper. The principal strains are a different quantity."
         )
 
+        self.bg = BackgroundControls()
+        self.bg.changed.connect(self.refresh)
+
         side = QVBoxLayout()
-        for w in (geo_box, seg_box, disp_box, self.run_btn, self.snap_btn,
-                  self.export_btn, self.banner):
+        for w in (geo_box, seg_box, disp_box, self.bg, self.run_btn,
+                  self.snap_btn, self.export_btn, self.banner):
             side.addWidget(w)
         side.addStretch(1)
         panel = QWidget(); panel.setLayout(side)
@@ -554,8 +625,19 @@ class StrainTab(QWidget):
             w.setEnabled(not auto)
 
     def _ins_mode(self, auto):
-        for w in (self.ins_x, self.ins_y, self.pick_ins):
+        for w in (self.ins_ant_x, self.ins_ant_y, self.pick_ant,
+                  self.ins_inf_x, self.ins_inf_y, self.pick_inf):
             w.setEnabled(not auto)
+        self._sync_clockwise()
+
+    def _sync_clockwise(self, *_):
+        """The two insertions decide the direction, so the box is then inert."""
+        both = self._insertions()[1] is not None
+        self.clockwise.setEnabled(not both)
+        self.clockwise.setToolTip(
+            "Which way the segment numbers run. The two insertion points "
+            "decide this when both are set, so it only applies to one point "
+            "or none.")
 
     def _range_mode(self, auto):
         for w in (self.pct_lo, self.pct_hi):
@@ -576,30 +658,53 @@ class StrainTab(QWidget):
             self.banner.setText("A setting changed. Compute strain again.")
 
     def _set_pick(self, which, on):
-        self._pick = which if on else None
-        other = self.pick_ins if which == "origin" else self.pick_origin
-        if on and other.isChecked():
-            other.setChecked(False)
+        """Arm or disarm a picker, leaving exactly one armed.
+
+        Un-checking the other button emits toggled and lands back here. It
+        used to clear the mode that had just been set, so the new button
+        stayed lit while the banner invited a click that went nowhere. The
+        fix is the order: disarm the others first, then record the mode. The
+        guard is belt and braces, so the re-entrant call does nothing at all,
+        and a genuine un-toggle still clears.
+        """
+        if self._arming:
+            return
         if on:
+            self._arming = True
+            try:
+                for name, button in self._pickers.items():
+                    if name != which and button.isChecked():
+                        button.setChecked(False)
+            finally:
+                self._arming = False
+            self._pick = which
             self.banner.setText(f"Click the strain map to set the {which}.")
+        elif self._pick == which:
+            self._pick = None
 
     def _clicked(self, event):
         """Take a point from the strain map, in library pixel coordinates."""
-        if self._pick is None or event.inaxes is None or event.xdata is None:
+        # held, because disarming the button below clears self._pick
+        which = self._pick
+        if which is None or event.xdata is None:
+            return
+        # only the map carries pixel coordinates; the curves and the bullseye
+        # would hand over a time or an angle
+        if self._map_ax is not None and event.inaxes is not self._map_ax:
+            return
+        if event.inaxes is None:
             return
         r0, c0 = self._crop
         # the library grids are 1-based, and the panel shows a crop
         x = c0 + float(event.xdata) + 1.0
         y = r0 + float(event.ydata) + 1.0
-        if self._pick == "origin":
-            self.origin_x.setValue(x); self.origin_y.setValue(y)
-            self.pick_origin.setChecked(False)
-        else:
-            self.ins_x.setValue(x); self.ins_y.setValue(y)
-            self.pick_ins.setChecked(False)
-        self.banner.setText(f"{self._pick} set to ({x:.1f}, {y:.1f}). "
+        boxes = {"origin": (self.origin_x, self.origin_y),
+                 "anterior": (self.ins_ant_x, self.ins_ant_y),
+                 "inferior": (self.ins_inf_x, self.ins_inf_y)}[which]
+        boxes[0].setValue(x); boxes[1].setValue(y)
+        self._pickers[which].setChecked(False)
+        self.banner.setText(f"{which} set to ({x:.1f}, {y:.1f}). "
                             "Compute strain again.")
-        self._pick = None
 
     def _sync_regions(self):
         """Offer the structures that were actually outlined."""
@@ -653,6 +758,39 @@ class StrainTab(QWidget):
             return None
         return (self.origin_x.value(), self.origin_y.value())
 
+    def _insertions(self):
+        """The anterior and inferior points, either of which may be absent.
+
+        A point left at the origin of the spin boxes has not been placed, so
+        it is read as absent and the inferior one stays optional.
+        """
+        if self.ins_auto.isChecked():
+            return None, None
+        anterior = (self.ins_ant_x.value(), self.ins_ant_y.value())
+        inferior = (self.ins_inf_x.value(), self.ins_inf_y.value())
+        return (anterior if any(anterior) else None,
+                inferior if any(inferior) else None)
+
+    def _describe_septum(self, geometry):
+        """What the two points span, against what the model expects."""
+        if not geometry:
+            return "-"
+        arc = geometry.get("septal_arc")
+        if arc is None:
+            if geometry.get("anterior") is None:
+                return "no insertion points, segment 1 starts at the right"
+            return "one point, direction from the clockwise box"
+        measured = np.degrees(arc)
+        ideal = expected_septal_arc(self._level(), self.nseg.value())
+        if ideal is None:
+            return f"{measured:.0f} deg between the insertions"
+        off = abs(measured - np.degrees(ideal))
+        text = (f"{measured:.0f} deg between the insertions, "
+                f"{off:.0f} from the model's {np.degrees(ideal):.0f}")
+        if off > 45:
+            text += ". Check which point is which."
+        return text
+
     def run(self):
         motion = self.session.result(Stage.MOTION)
         self._sync_regions()
@@ -667,21 +805,22 @@ class StrainTab(QWidget):
         nfr = motion.best.shape[-1]
         st = pixel_strain_2d(motion.best, mask[:, :, 0], origin=self._origin(),
                              times=self._times(nfr))
-        kw = {}
-        if not self.ins_auto.isChecked():
-            kw["position_a"] = self.ins_x.value()
-            kw["position_b"] = self.ins_y.value()
+        anterior, inferior = self._insertions()
         seg = strain_by_segments(
             st, n_segments=self.nseg.value(),
             clockwise=self.clockwise.isChecked(), origin=self._origin(),
-            outlier_threshold=self.outlier.value(), **kw,
+            outlier_threshold=self.outlier.value(),
+            anterior=anterior, inferior=inferior,
         )
+        septum = self._describe_septum(seg.geometry)
+        self.septum_lbl.setText(septum)
         self.session.set_result(Stage.STRAIN, {"strain": st, "segments": seg})
         self._sync_components()
         ox, oy = st.origin if st.origin is not None else (float("nan"),) * 2
         self.banner.setText(
             f"{int(st.mask.sum())} pixels of {self.region.currentText()} over "
-            f"{seg.n_segments} segments, centre ({ox:.1f}, {oy:.1f})."
+            f"{seg.n_segments} segments, centre ({ox:.1f}, {oy:.1f}). "
+            f"Septum: {septum}"
         )
         self.refresh()
 
@@ -730,7 +869,10 @@ class StrainTab(QWidget):
             self.plot.draw()
             return
         st, seg = res["strain"], res["segments"]
-        comp = self.component.currentText().split()[0] or "CC"
+        # "".split() is empty, so the old "or CC" could never stand in for
+        # an empty box; it raised instead
+        label = self.component.currentText().split()
+        comp = label[0] if label else "CC"
         field = getattr(st, comp, None)
         if field is None:
             self.plot.draw()
@@ -746,18 +888,30 @@ class StrainTab(QWidget):
         diverging = comp not in {"p1or"}
 
         ax = self.plot.axes(2, 3, 1)
+        self._map_ax = ax
         lo, hi = self._range(field)
-        im = ax.imshow(field[r0:r1, c0:c1, fr],
-                       cmap="RdBu_r" if diverging else "twilight",
-                       vmin=lo, vmax=hi)
+        cmap = "RdBu_r" if diverging else "twilight"
+        draw_background(ax, self.bg, self.session, fr, (r0, r1, c0, c1))
+        ax.imshow(field[r0:r1, c0:c1, fr], cmap=cmap, vmin=lo, vmax=hi,
+                  alpha=self.bg.opacity(), zorder=1)
         ax.set_title(f"{comp} frame {fr + 1}"); ax.axis("off")
-        self.plot.fig.colorbar(im, ax=ax, shrink=0.8)
+        bar = ScalarMappable(norm=Normalize(vmin=lo, vmax=hi), cmap=cmap)
+        self.plot.fig.colorbar(bar, ax=ax, shrink=0.8)
+        centre = None
         if st.origin is not None and np.all(np.isfinite(st.origin)):
-            ax.plot(st.origin[0] - 1 - c0, st.origin[1] - 1 - r0,
-                    "k+", ms=9, mew=1.5)
-        if not self.ins_auto.isChecked():
-            ax.plot(self.ins_x.value() - 1 - c0, self.ins_y.value() - 1 - r0,
-                    "kx", ms=8, mew=1.5)
+            centre = (st.origin[0] - 1 - c0, st.origin[1] - 1 - r0)
+            ax.plot(*centre, "k+", ms=9, mew=1.5)
+        anterior, inferior = self._insertions()
+        for point, marker, style in ((anterior, "kx", "--"),
+                                     (inferior, "k*", ":")):
+            if point is None:
+                continue
+            px, py = point[0] - 1 - c0, point[1] - 1 - r0
+            ax.plot(px, py, marker, ms=9, mew=1.5)
+            if centre is not None:
+                # the ray, so the numbering can be checked by eye
+                ax.plot([centre[0], px], [centre[1], py], style,
+                        color="k", lw=1.0)
 
         ax2 = self.plot.axes(2, 3, 2)
         for name, style in (("CC", "-o"), ("RR", "-s")):
@@ -770,8 +924,17 @@ class StrainTab(QWidget):
         ax2.set_title("global curves")
 
         ax3 = self.plot.axes(2, 3, 3)
-        ax3.imshow(seg.segments[r0:r1, c0:c1], cmap="tab20")
-        ax3.set_title(f"{seg.n_segments} segments"); ax3.axis("off")
+        # seeing the wedges against the wall is the point of this panel
+        draw_background(ax3, self.bg, self.session, fr, (r0, r1, c0, c1))
+        ax3.imshow(seg.segments[r0:r1, c0:c1], cmap="tab20",
+                   alpha=self.bg.opacity(), zorder=1)
+        arc = seg.geometry.get("septal_arc")
+        ax3.set_title(f"{seg.n_segments} segments", fontsize=9)
+        ax3.set_xlabel("" if arc is None else f"septum {np.degrees(arc):.0f} deg",
+                       fontsize=7)
+        ax3.set_xticks([]); ax3.set_yticks([])
+        for side in ax3.spines.values():
+            side.set_visible(False)
 
         curves = seg.CC if seg.CC is not None else seg.RR
         which = "CC" if seg.CC is not None else "RR"
@@ -805,13 +968,21 @@ class StrainTab(QWidget):
         sm = ScalarMappable(norm=Normalize(vmin=lo, vmax=hi), cmap="RdBu_r")
         for ring in rings:
             for theta, width, value in ring["wedges"]:
-                ax.bar(theta + width / 2, ring["height"], width=width,
+                # centred on theta, not theta + width/2, so segment 1 sits
+                # at twelve o'clock rather than starting there
+                ax.bar(theta, ring["height"], width=width,
                        bottom=ring["radius"],
                        color=sm.to_rgba(value) if np.isfinite(value) else "#dddddd",
                        edgecolor="white", linewidth=1.0)
         step = 2 * np.pi / seg.n_segments
-        ax.set_xticks([i * step + step / 2 for i in range(seg.n_segments)])
-        ax.set_xticklabels([str(i + 1) for i in range(seg.n_segments)], fontsize=6)
+        # segment 1 is the anterior wall, which belongs at the top, and the
+        # wedges run the way they do on the image rather than always
+        # anticlockwise
+        ax.set_theta_zero_location("N")
+        ax.set_theta_direction(-seg.geometry.get("direction", -1))
+        ax.set_xticks([i * step for i in range(seg.n_segments)])
+        ax.set_xticklabels(short_labels(self._level(), seg.n_segments),
+                           fontsize=6)
         ax.set_yticks([]); ax.set_ylim(0, 1)
         ax.set_title(f"peak {which}", fontsize=9)
         self.plot.fig.colorbar(sm, ax=ax, shrink=0.7)
@@ -829,12 +1000,73 @@ class StrainTab(QWidget):
         ax.grid(alpha=0.3, axis="x")
         ax.set_title("peak per segment", fontsize=9)
 
+    # ----------------------------------------------------------- projects
+
+    def geometry_config(self):
+        """The segment geometry, for saving with a project."""
+        anterior, inferior = self._insertions()
+        return {
+            "origin": None if self.origin_auto.isChecked()
+            else [self.origin_x.value(), self.origin_y.value()],
+            "anterior": None if anterior is None else list(anterior),
+            "inferior": None if inferior is None else list(inferior),
+            "clockwise": self.clockwise.isChecked(),
+            "n_segments": self.nseg.value(),
+            "level": self.level.currentText(),
+            "outlier_threshold": self.outlier.value(),
+        }
+
+    def apply_geometry_config(self, config):
+        """Put a saved geometry back on the controls.
+
+        An absent key means the project predates this being saved, so the
+        control keeps its default rather than being reset to something the
+        user never chose.
+        """
+        if not config:
+            return
+        widgets = (self.origin_x, self.origin_y, self.ins_ant_x,
+                   self.ins_ant_y, self.ins_inf_x, self.ins_inf_y,
+                   self.origin_auto, self.ins_auto, self.clockwise,
+                   self.nseg, self.level, self.outlier)
+        blocked = [w.blockSignals(True) for w in widgets]
+        try:
+            origin = config.get("origin")
+            self.origin_auto.setChecked(origin is None)
+            if origin is not None:
+                self.origin_x.setValue(float(origin[0]))
+                self.origin_y.setValue(float(origin[1]))
+            anterior = config.get("anterior")
+            inferior = config.get("inferior")
+            self.ins_auto.setChecked(anterior is None)
+            for point, boxes in ((anterior, (self.ins_ant_x, self.ins_ant_y)),
+                                 (inferior, (self.ins_inf_x, self.ins_inf_y))):
+                if point is not None:
+                    boxes[0].setValue(float(point[0]))
+                    boxes[1].setValue(float(point[1]))
+            if "clockwise" in config:
+                self.clockwise.setChecked(bool(config["clockwise"]))
+            if "n_segments" in config:
+                self.nseg.setValue(int(config["n_segments"]))
+            if config.get("level"):
+                self.level.setCurrentText(str(config["level"]))
+            if "outlier_threshold" in config:
+                self.outlier.setValue(float(config["outlier_threshold"]))
+        finally:
+            for w, was in zip(widgets, blocked):
+                w.blockSignals(was)
+        self._origin_mode(self.origin_auto.isChecked())
+        self._ins_mode(self.ins_auto.isChecked())
+
     # ------------------------------------------------------------ snapshots
 
     def settings(self):
         """Everything that shaped the current result, for the settings diff."""
         motion = self.session.result(Stage.MOTION)
         meta = dict(getattr(motion, "meta", {}) or {}) if motion else {}
+        anterior, inferior = self._insertions()
+        res = self.session.result(Stage.STRAIN) or {}
+        geometry = getattr(res.get("segments"), "geometry", {})
         out = {
             "region": self.region.currentText(),
             "segments": self.nseg.value(),
@@ -843,8 +1075,10 @@ class StrainTab(QWidget):
             "outlier above": self.outlier.value(),
             "centre": ("mask centroid" if self.origin_auto.isChecked()
                        else (self.origin_x.value(), self.origin_y.value())),
-            "insertion": ("default angle" if self.ins_auto.isChecked()
-                          else (self.ins_x.value(), self.ins_y.value())),
+            "anterior insertion": ("default angle" if anterior is None
+                                   else anterior),
+            "inferior insertion": ("not set" if inferior is None else inferior),
+            "septal arc": self._describe_septum(geometry),
         }
         for key in ("kernel", "a", "eta", "downsample", "reference", "njumps",
                     "phase_jump_rule", "connectivity", "seed", "temporal_fit",
@@ -875,6 +1109,8 @@ class StrainTab(QWidget):
     def export(self):
         res = self.session.result(Stage.STRAIN)
         if res is None:
+            # every other guard here says why nothing happened
+            self.banner.setText("Compute strain before exporting.")
             return
         path, _ = QFileDialog.getSaveFileName(
             self, "Export", "harpi_result.mat",
