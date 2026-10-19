@@ -135,6 +135,14 @@ def test_taking_a_snapshot_keeps_the_settings(pair):
     assert snap.strain is not None and snap.segments is not None
 
 
+def test_a_snapshot_keeps_the_jump_rule(pair):
+    strain, _ = pair
+    strain.session.result(Stage.MOTION).meta["phase_jump_rule"] = "nearest"
+    strain.run()
+    strain.take_snapshot()
+    assert strain.session.snapshots[0].settings["phase_jump_rule"] == "nearest"
+
+
 def test_a_snapshot_survives_invalidation(pair):
     """The whole point: it must outlive the settings that produced it."""
     strain, _ = pair

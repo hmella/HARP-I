@@ -20,13 +20,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from .consistency import temporal_phase_consistency
+from .consistency import nearest_coordinate_consistency, temporal_phase_consistency
 from .interp import distance_matrix, rbf_interpolate, solve_tikhonov
 from .rbf import get_kernel
 from .smoothing import smooth_reference_phase
 from .temporal import fit_temporal
 from .types import MotionResult
 from .unwrap import phase_quality_2d, unwrap2, unwrap3
+
+# Rules for the per-frame 2*pi offsets; the first is the default.
+PHASE_JUMP_RULES = ("published", "nearest")
 
 __all__ = ["estimate_motion_2d", "estimate_motion_3d", "shape_schedule",
            "flip_components"]
@@ -150,6 +153,7 @@ def estimate_motion_2d(
     reference=0,
     njumps=8,
     progress=None,
+    phase_jump_rule="published",
 ):
     """Estimate 2-D Lagrangian displacement from a filtered harmonic image.
 
@@ -168,11 +172,21 @@ def estimate_motion_2d(
         Stride for the interpolation centres, to bound the dense solve.
     progress
         Optional ``callable(frame_index, n_frames, stage)``.
+    phase_jump_rule
+        ``"published"`` (the default, as in the MATLAB toolbox) chooses the
+        2*pi offset of each frame with
+        :func:`~harpi.consistency.temporal_phase_consistency`, searching
+        ``njumps`` steps around its estimate. ``"nearest"`` uses
+        :func:`~harpi.consistency.nearest_coordinate_consistency`, which
+        ignores ``njumps``.
 
     Returns
     -------
     :class:`~harpi.types.MotionResult`
     """
+    if phase_jump_rule not in PHASE_JUMP_RULES:
+        raise ValueError(f"phase_jump_rule must be one of {PHASE_JUMP_RULES}, "
+                         f"not {phase_jump_rule!r}")
     Ih = np.asarray(harmonic_image)
     if Ih.ndim != 4 or Ih.shape[2] != 2:
         raise ValueError("harmonic_image must be (rows, cols, 2, frames)")
@@ -233,10 +247,15 @@ def estimate_motion_2d(
 
     if progress:
         progress(0, nfr, "consistency")
-    jumps, jump_info = temporal_phase_consistency(
-        [dxpha, dypha], reference=reference, njumps=njumps, downsample=2,
-        return_info=True,
-    )
+    if phase_jump_rule == "nearest":
+        jumps, jump_info = nearest_coordinate_consistency(
+            [dxpha, dypha], reference=reference, downsample=2, return_info=True,
+        )
+    else:
+        jumps, jump_info = temporal_phase_consistency(
+            [dxpha, dypha], reference=reference, njumps=njumps, downsample=2,
+            return_info=True,
+        )
     dxpha = dxpha + jumps[0][None, None, :]
     dypha = dypha + jumps[1][None, None, :]
 
@@ -294,6 +313,7 @@ def estimate_motion_2d(
         unwrap_complete=complete,
         meta={"kernel": kern.name, "a": a_sched, "eta": eta, "downsample": dfac,
               "njumps": njumps, "jump_search": jump_info,
+              "phase_jump_rule": phase_jump_rule,
               "temporal_order": temporal_order if temporal_fit else None},
     )
 
@@ -313,13 +333,22 @@ def estimate_motion_3d(
     njumps=2,
     chunks=4,
     progress=None,
+    phase_jump_rule="published",
 ):
     """Estimate 3-D Lagrangian displacement. See :func:`estimate_motion_2d`.
 
     ``chunks`` splits the evaluation of each frame into interleaved slabs, so
     the dense evaluation matrix is never held whole. The factorisation is
     reused across slabs.
+
+    Only the published rule for the phase jumps is available in 3-D.
     """
+    if phase_jump_rule not in PHASE_JUMP_RULES:
+        raise ValueError(f"phase_jump_rule must be one of {PHASE_JUMP_RULES}, "
+                         f"not {phase_jump_rule!r}")
+    if phase_jump_rule != "published":
+        raise ValueError("the nearest-coordinate rule for the phase jumps is "
+                         "available in 2-D only")
     Ih = np.asarray(harmonic_image)
     if Ih.ndim != 5 or Ih.shape[3] != 3:
         raise ValueError("harmonic_image must be (rows, cols, slices, 3, frames)")
@@ -425,5 +454,6 @@ def estimate_motion_3d(
         phase_jumps=jumps,
         unwrap_complete=complete,
         meta={"kernel": kern.name, "a": a_sched, "eta": eta, "downsample": dfac,
-              "njumps": njumps, "jump_search": jump_info},
+              "njumps": njumps, "jump_search": jump_info,
+              "phase_jump_rule": phase_jump_rule},
     )

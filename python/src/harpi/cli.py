@@ -30,7 +30,7 @@ def _cmd_process(args):
         Ih, ds.mask, kernel=args.kernel, a=a, eta=args.eta,
         smooth_reference=args.smooth_reference, temporal_fit=args.temporal_fit,
         temporal_order=args.temporal_order, downsample=args.downsample,
-        progress=progress,
+        progress=progress, phase_jump_rule=args.phase_jump_rule,
     )
     if not res.unwrap_complete.all():
         bad = np.flatnonzero(~res.unwrap_complete)
@@ -88,6 +88,9 @@ def main(argv=None) -> int:
     pr.add_argument("--smooth-reference", action="store_true")
     pr.add_argument("--temporal-fit", action="store_true")
     pr.add_argument("--temporal-order", type=int, default=10)
+    pr.add_argument("--phase-jump-rule", default="published",
+                    choices=["published", "nearest"],
+                    help="rule for the 2*pi offset of each frame")
     pr.add_argument("-v", "--verbose", action="store_true")
     pr.set_defaults(func=_cmd_process)
 

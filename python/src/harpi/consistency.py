@@ -8,14 +8,22 @@ frame.
 The search runs on convex hulls. The criterion only needs the largest
 distance between two point sets, which is always reached at hull vertices,
 and a candidate jump just translates one of the sets.
+
+:func:`nearest_coordinate_consistency` is an alternative rule that compares
+every virtual coordinate of a frame with the reference ones. It is available
+in the Python port only, and :func:`temporal_phase_consistency` stays the
+default everywhere.
 """
 
 from __future__ import annotations
 
-import numpy as np
-from scipy.spatial import ConvexHull
+from itertools import product
 
-__all__ = ["temporal_phase_consistency", "max_pair_distance", "extreme_points"]
+import numpy as np
+from scipy.spatial import ConvexHull, cKDTree
+
+__all__ = ["temporal_phase_consistency", "nearest_coordinate_consistency",
+           "max_pair_distance", "extreme_points"]
 
 
 def extreme_points(points: np.ndarray) -> np.ndarray:
@@ -128,4 +136,92 @@ def temporal_phase_consistency(phases, reference=0, njumps=8, downsample=2,
 
     if return_info:
         return jumps, {"delta": coarse, "offset": offset, "njumps": int(njumps)}
+    return jumps
+
+
+def nearest_coordinate_consistency(phases, reference=0, radius=2, downsample=2,
+                                   return_info=False):
+    """Resolve the per-frame 2*pi offsets with the nearest-coordinate rule.
+
+    :func:`temporal_phase_consistency` reduces each set of virtual coordinates
+    to its largest pairwise distance. When the mask of a frame does not hold
+    exactly the tissue of the reference mask, that distance changes by only a
+    fraction of a period between neighbouring candidates, and a small change
+    of the images or of the mask can move a whole frame by one period. This
+    rule uses every coordinate instead. It starts from the rounded difference
+    between the mean coordinates of the reference and of the frame, tries the
+    integer offsets within ``radius`` of it in every direction, and keeps the
+    one that minimises the mean distance from each coordinate of the frame to
+    the nearest reference coordinate. The distance runs from the frame to the
+    reference only, since the mask of a frame may hold less tissue than the
+    reference mask.
+
+    Parameters
+    ----------
+    phases
+        Sequence of ``ndim`` arrays, each ``(..., frames)`` of unwrapped phase
+        with NaN outside the mask.
+    reference
+        Index of the reference frame.
+    radius
+        Half width of the search around the starting estimate, in periods.
+    downsample
+        Stride applied before searching, as in :func:`temporal_phase_consistency`.
+    return_info
+        Also return a dict with ``delta`` (the starting estimate per frame),
+        ``offset`` (how many steps the chosen jump sits away from it) and
+        ``njumps`` (the radius), the keys :func:`temporal_phase_consistency`
+        returns.
+
+    Returns
+    -------
+    ``(ndim, frames)`` array of additive phase offsets, each a multiple of
+    2*pi, and optionally the search info.
+    """
+    phases = [np.asarray(p, dtype=float) for p in phases]
+    ndim = len(phases)
+    spatial = phases[0].ndim - 1
+    nfr = phases[0].shape[-1]
+
+    if downsample and downsample > 1:
+        phases = [_downsample(p, downsample, spatial) for p in phases]
+
+    valid = np.ones(phases[0].shape, dtype=bool)
+    for p in phases:
+        valid &= ~np.isnan(p)
+
+    def points(fr):
+        """``(N, ndim)`` coordinates of one frame."""
+        sel = valid[..., fr]
+        return np.stack([p[..., fr][sel] for p in phases], axis=1)
+
+    ref_pts = points(reference)
+    if len(ref_pts) == 0:
+        raise ValueError("the reference frame has no valid pixels")
+    tree = cKDTree(ref_pts)
+    ref_mean = ref_pts.mean(axis=0)
+    steps = [np.array(s) for s in product(range(-radius, radius + 1), repeat=ndim)]
+
+    jumps = np.zeros((ndim, nfr))
+    start = np.zeros((ndim, nfr))
+    offset = np.zeros((ndim, nfr))
+    for fr in range(nfr):
+        if fr == reference:
+            continue
+        pts = points(fr)
+        if len(pts) == 0:
+            continue
+        guess = np.round((ref_mean - pts.mean(axis=0)) / (2 * np.pi))
+        best, best_c = np.inf, guess
+        for step in steps:
+            c = guess + step
+            d = tree.query(pts + 2 * np.pi * c)[0].mean()
+            if d < best:
+                best, best_c = d, c
+        jumps[:, fr] = 2 * np.pi * best_c
+        start[:, fr] = guess
+        offset[:, fr] = best_c - guess
+
+    if return_info:
+        return jumps, {"delta": start, "offset": offset, "njumps": int(radius)}
     return jumps

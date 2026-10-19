@@ -7,16 +7,26 @@ import harpi
 from conftest import masked_columns
 
 
-@pytest.fixture(scope="module")
-def motion(dataset):
+def _solve(dataset, **kw):
     flt = harpi.HarpFilter2D(dataset.image, dataset.ke, (0.0, np.pi / 2),
                              kind="transmission")
     return harpi.estimate_motion_2d(
         flt(dataset.image), dataset.mask,
         kernel="multiquadric3", a=dataset.suggested_a, eta=15.0,
         connectivity=4, smooth_reference=True, temporal_fit=True,
-        temporal_order=10, downsample=1,
+        temporal_order=10, downsample=1, **kw,
     )
+
+
+@pytest.fixture(scope="module")
+def motion(dataset):
+    return _solve(dataset)
+
+
+@pytest.fixture(scope="module")
+def nearest(dataset):
+    """The same solve with the nearest-coordinate rule for the phase jumps."""
+    return _solve(dataset, phase_jump_rule="nearest")
 
 
 def test_phase_jumps_match_matlab_exactly(reference):
@@ -142,3 +152,51 @@ def test_widening_the_jump_search_is_safe(dataset):
     used = int(np.abs(narrow.meta["jump_search"]["offset"]).max())
     if used < 1:
         assert np.array_equal(narrow.phase_jumps, wide.phase_jumps)
+
+
+# ------------------------------------------------------ phase jump rules
+
+def test_the_published_rule_is_the_default(motion):
+    assert motion.meta["phase_jump_rule"] == "published"
+
+
+def test_the_nearest_rule_is_recorded(nearest):
+    assert nearest.meta["phase_jump_rule"] == "nearest"
+
+
+def test_the_rules_differ_only_in_the_jumps(motion, nearest):
+    """Frames given the same jumps are solved identically, the others differ
+    by whole periods."""
+    same = np.all(motion.phase_jumps == nearest.phase_jumps, axis=0)
+    assert same[0]
+    assert np.array_equal(motion.u[..., same], nearest.u[..., same], equal_nan=True)
+    periods = (nearest.phase_jumps - motion.phase_jumps) / (2 * np.pi)
+    assert np.allclose(periods, np.round(periods), rtol=0, atol=1e-9)
+
+
+def test_the_nearest_rule_keeps_the_motion_continuous(dataset, motion, nearest):
+    """No frame moves by a tag period relative to the frame before.
+
+    The check can fail: on this dataset the published rule puts frames 6 to
+    9, 11 and 17 one period off in x.
+    """
+    half = 0.5 * dataset.pixels_per_wavelength
+
+    def largest_step(res):
+        centre = np.nanmedian(res.u, axis=(0, 1))       # (2, frames)
+        return np.abs(np.diff(centre, axis=1)).max()
+
+    assert largest_step(nearest) < half
+    assert largest_step(motion) > half
+
+
+def test_an_unknown_jump_rule_is_refused():
+    with pytest.raises(ValueError, match="phase_jump_rule"):
+        harpi.estimate_motion_2d(np.zeros((8, 8, 2, 3), complex), np.ones((8, 8)),
+                                 a=1.0, phase_jump_rule="centroid")
+
+
+def test_the_nearest_rule_is_2d_only():
+    with pytest.raises(ValueError, match="2-D only"):
+        harpi.estimate_motion_3d(np.zeros((8, 8, 8, 3, 3), complex), np.ones((8, 8, 8)),
+                                 a=1.0, phase_jump_rule="nearest")

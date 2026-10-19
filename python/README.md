@@ -100,6 +100,24 @@ drawing a contour replaces it with one built from the contours.
 Two things the scripts left invisible are shown here: whether unwrapping
 completed on each frame, and the phase jumps picked by the consistency step.
 
+The phase jump of a frame is the whole number of periods, one per tag
+direction, that unwrapping leaves undetermined. The **jump rule** box on the
+Motion tab chooses how it is found. The *published* rule, the default and the
+one in the MATLAB toolbox, compares the largest distance between the virtual
+coordinates of the frame and those of the reference, searching the number of
+steps set in *jump search*. The *nearest coordinate* rule starts from the
+difference of the mean coordinates and keeps the offset that brings the
+coordinates of the frame closest to reference ones. It is steadier when the
+mask of a frame does not hold exactly the tissue of the reference mask. It is
+available for 2-D data in the Python port only, from the library as
+
+```python
+res = harpi.estimate_motion_2d(flt(ds.image), ds.mask, a=ds.suggested_a,
+                               phase_jump_rule="nearest")
+```
+
+and from the shell as `harpi process --phase-jump-rule nearest`.
+
 The Motion tab has a **Displacement components** box with *swap x and y*,
 *flip x* and *flip y*. The sign and the order of the components follow the
 tag directions given to the filter and the row and column convention of the

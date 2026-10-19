@@ -26,7 +26,7 @@ DENSEanalysis, as noted in their module docstrings.
 """
 
 from .config import FilterConfig, HarpiConfig, MotionConfig, StrainConfig
-from .consistency import temporal_phase_consistency
+from .consistency import nearest_coordinate_consistency, temporal_phase_consistency
 from .fft import itok, ktoi
 from .filters import (
     HarpFilter2D,
@@ -62,7 +62,8 @@ __all__ = [
     "HarpFilter2D", "HarpFilter3D", "harmonic_center",
     "centre_to_frequency", "frequency_to_centre",
     "phase_quality_2d", "phase_quality_3d", "unwrap2", "unwrap3",
-    "temporal_phase_consistency", "smooth_reference_phase",
+    "temporal_phase_consistency", "nearest_coordinate_consistency",
+    "smooth_reference_phase",
     "rbf_interpolate", "solve_tikhonov", "get_kernel", "KERNELS", "RBFKernel",
     "estimate_motion_2d", "estimate_motion_3d", "fit_temporal",
     "flip_components",

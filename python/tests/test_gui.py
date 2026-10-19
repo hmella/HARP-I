@@ -334,7 +334,7 @@ def _solve(window, dataset):
         window.session.result(Stage.FILTER)["image"], window.session.mask,
         kernel=mt.kernel.currentText(), a=mt.a.value(), eta=mt.eta.value(),
         temporal_fit=mt.tfit.isChecked(), temporal_order=mt.torder.value(),
-        njumps=mt.njumps.value(),
+        njumps=mt.njumps.value(), phase_jump_rule=mt.jump_rule.currentData(),
     )
 
 
@@ -358,6 +358,24 @@ def test_changing_a_solver_setting_clears_the_result(solved, control, value):
     getattr(solved.motion_tab, control).setValue(value)
     assert not solved.session.has(Stage.MOTION), control
     assert "re-run" in solved.motion_tab.banner.text()
+
+
+def test_changing_the_jump_rule_clears_the_result(solved):
+    mt = solved.motion_tab
+    mt.jump_rule.setCurrentIndex(mt.jump_rule.findData("nearest"))
+    assert not solved.session.has(Stage.MOTION)
+    assert "re-run" in mt.banner.text()
+
+
+def test_the_jump_search_box_follows_the_rule(window):
+    """The search budget belongs to the published rule only."""
+    mt = window.motion_tab
+    assert mt.jump_rule.currentData() == "published"
+    assert mt.njumps.isEnabled()
+    mt.jump_rule.setCurrentIndex(mt.jump_rule.findData("nearest"))
+    assert not mt.njumps.isEnabled()
+    mt.jump_rule.setCurrentIndex(mt.jump_rule.findData("published"))
+    assert mt.njumps.isEnabled()
 
 
 def test_toggling_the_fit_clears_the_result(solved):
@@ -415,6 +433,18 @@ def test_jump_search_reports_whether_the_budget_binds(solved):
     assert f"used {used} of" in text
     if used < info["njumps"]:
         assert "will not change" in text
+
+
+def test_the_budget_advice_is_for_the_published_rule_only(solved, dataset):
+    """The nearest-coordinate rule has no budget to raise."""
+    mt = solved.motion_tab
+    mt.jump_rule.setCurrentIndex(mt.jump_rule.findData("nearest"))
+    mt._done(_solve(solved, dataset))
+    res = solved.session.result(Stage.MOTION)
+    assert res.meta["phase_jump_rule"] == "nearest"
+    text = mt.jump_lbl.text()
+    assert "search used" in text
+    assert "will not change" not in text
 
 
 def test_settings_survive_running(solved, dataset):

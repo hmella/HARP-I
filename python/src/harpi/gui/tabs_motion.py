@@ -75,6 +75,14 @@ class MotionTab(QWidget):
         self.tfit = QCheckBox("temporal polynomial fit"); self.tfit.setChecked(True)
         self.torder = QSpinBox(); self.torder.setRange(2, 20); self.torder.setValue(10)
         self.njumps = QSpinBox(); self.njumps.setRange(1, 16); self.njumps.setValue(8)
+        self.jump_rule = QComboBox()
+        self.jump_rule.addItem("published", "published")
+        self.jump_rule.addItem("nearest coordinate", "nearest")
+        self.jump_rule.setToolTip(
+            "How the 2π offset of each frame is chosen. The published rule "
+            "compares the largest distance between virtual coordinates and "
+            "searches the steps set in 'jump search'. The nearest-coordinate "
+            "rule compares every coordinate with the nearest reference one.")
         self.reference = QSpinBox(); self.reference.setMinimum(1); self.reference.setValue(1)
         self.reference.setToolTip(
             "Frame every displacement is measured from, usually end diastole.")
@@ -92,12 +100,15 @@ class MotionTab(QWidget):
         for w in (self.a, self.eta, self.downsample, self.njumps, self.torder,
                   self.reference):
             w.valueChanged.connect(self._settings_changed)
-        for w in (self.kernel, self.a_dist):
+        for w in (self.kernel, self.a_dist, self.jump_rule):
             w.currentIndexChanged.connect(self._settings_changed)
         for w in (self.smooth, self.tfit):
             w.toggled.connect(self._settings_changed)
         self.tfit.toggled.connect(self.torder.setEnabled)
         self.torder.setEnabled(self.tfit.isChecked())
+        # Only the published rule has a search budget.
+        self.jump_rule.currentIndexChanged.connect(
+            lambda _: self.njumps.setEnabled(self.jump_rule.currentData() == "published"))
 
         form = QFormLayout()
         form.addRow("kernel", self.kernel)
@@ -105,6 +116,7 @@ class MotionTab(QWidget):
         form.addRow("a schedule", self.a_dist)
         form.addRow("eta", self.eta)
         form.addRow("downsample", self.downsample)
+        form.addRow("jump rule", self.jump_rule)
         form.addRow("jump search", self.njumps)
         form.addRow("reference frame", self.reference)
         form.addRow("unwrapping", self.unwrap_lbl)
@@ -247,6 +259,7 @@ class MotionTab(QWidget):
             temporal_order=self.torder.value(),
             downsample=self.downsample.value(),
             njumps=self.njumps.value(),
+            phase_jump_rule=self.jump_rule.currentData(),
             reference=self.reference.value() - 1,
             connectivity=self.session.unwrap["connectivity"],
             seed=self.session.unwrap["seed"],
@@ -327,7 +340,7 @@ class MotionTab(QWidget):
             used = int(np.abs(info["offset"]).max())
             budget = int(info["njumps"])
             text += f"\nsearch used {used} of {budget} steps"
-            if used < budget:
+            if used < budget and res.meta.get("phase_jump_rule", "published") == "published":
                 text += " (raising it will not change the result)"
         self.jump_lbl.setText(text)
 
@@ -824,7 +837,8 @@ class StrainTab(QWidget):
                           else (self.ins_x.value(), self.ins_y.value())),
         }
         for key in ("kernel", "a", "eta", "downsample", "reference", "njumps",
-                    "connectivity", "seed", "temporal_fit", "temporal_order"):
+                    "phase_jump_rule", "connectivity", "seed", "temporal_fit",
+                    "temporal_order"):
             if key in meta:
                 v = meta[key]
                 out[key] = tuple(np.ravel(v)) if isinstance(v, np.ndarray) else v
