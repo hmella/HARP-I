@@ -62,16 +62,45 @@ harpi gui
 Segmentation comes after filtering because the borders are drawn on the
 harmonic phase, which only exists once the filter has run.
 
-Each tab header shows the state of that stage, and changing a setting clears
-every stage after it.
+Each tab header shows the state of that stage: empty, done, or a half mark
+meaning there is a result but the controls have moved past it. Changing a
+setting clears every stage after it, with one exception described below.
 
-On the **Filtering** tab the passband is shaded on the k-space panel and its
-centre is a draggable marker, one per encoding direction. Drag it onto the
-harmonic peak, or type the row and column, and the readout gives the
+On the **Filtering** tab the three panels always show the filter the controls
+describe, before anything is applied and whatever is applied already. The
+response is drawn over the k-space as a shading that fades through the
+skirts, so the rolloff is visible rather than only the region it passes, and
+a slider sets how strongly it covers the data. A line marks where the
+response has fallen to a chosen fraction of its peak, five per cent by
+default and as an amplitude rather than a power, which is where the filter
+effectively ends. Beside it the filtered k-space
+and the harmonic magnitude show what the setting does to the image. All three
+follow every control as it changes, including a centre marker while it is
+being dragged.
+
+What is drawn is what *Apply filter* would store, not an approximation of it:
+the preview filters one frame of one encoding with the same arithmetic, which
+is why it costs about a millisecond instead of the fifty the whole series
+takes.
+
+Filtering is the exception to the rule above. Its controls are a preview and
+nothing is committed until *Apply filter*, so trying a setting cannot throw
+away a solved motion field. While the controls differ from what was applied
+the tab says so and the header carries the half mark; the rest of the
+pipeline goes on using the filter that was applied until you press Apply
+again.
+
+The centre is a draggable marker, one per encoding direction. Drag it onto
+the harmonic peak, or type the row and column, and the readout gives the
 resulting frequency, angle and tag wavelength next to the nominal one.
 *Detect peaks again* re-runs the search and *Reset to nominal* puts the
 centre back on the tag frequency. The wave vector is derived from the
 centre, so the transmission and the Butterworth filter both follow it.
+
+*cutoff* and *order* belong to the Butterworth filter only. The transmission
+window takes neither: its passband is fixed by the wave vector, so the two
+boxes are disabled while that kind is chosen rather than appearing to do
+something.
 
 The segmentation tab supports undo and redo (Ctrl+Z, Ctrl+Shift+Z), deleting
 points with a right click, scroll wheel zoom and drag to pan, keyboard frame
@@ -163,6 +192,10 @@ res = harpi.estimate_motion_2d(flt(ds.image), ds.mask, a=ds.suggested_a,
 
 and from the shell as `harpi process --phase-jump-rule published`. The rule used
 is recorded in `res.meta["phase_jump_rule"]` and printed by `harpi process`.
+
+Arrows are drawn at their true length, so an arrow on screen is the
+displacement in pixels and can be read against the image beneath it. The
+**Arrows** box lengthens them when the motion is too small to see.
 
 The Motion tab has a **Displacement components** box with *swap x and y*,
 *flip x* and *flip y*. The sign and the order of the components follow the

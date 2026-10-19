@@ -193,6 +193,8 @@ class ImageCanvas(QGraphicsView):
     pointClicked = Signal(float, float)
     markerMoved = Signal(int, float, float)
     """A draggable marker was released at a new scene position."""
+    markerDragged = Signal(int, float, float)
+    """A draggable marker moved, with the button still down."""
 
     HANDLE = 3.0
 
@@ -213,6 +215,7 @@ class ImageCanvas(QGraphicsView):
         self._drag = None
         self._show_mask = True
         self._mask = None          # the last overlay, so it can be put back
+        self._outlines = []        # polylines drawn over it
         # Only an editable canvas pushes commands, and whoever makes one
         # editable sets this. Declared so a new editable canvas fails here
         # rather than on the first right click.
@@ -249,19 +252,37 @@ class ImageCanvas(QGraphicsView):
             self.scene().setSceneRect(rect)
             self._user_zoomed = False
 
-    def set_mask_overlay(self, mask):
-        # kept, so toggling can put it back without the tab redrawing
-        self._mask = None if mask is None else np.asarray(mask, dtype=bool)
+    def set_mask_overlay(self, mask, colour=(60, 180, 255)):
+        """Tint the image where a mask is set, or by a graded value.
+
+        ``mask`` is a boolean array, or a float array in [0, 1] read as the
+        alpha of each pixel, which is what shows a filter response as a
+        continuous shading rather than a threshold. A boolean array gives
+        exactly the same pixels as it always did.
+        """
+        # kept undecorated, so toggling puts back what was drawn: coercing to
+        # bool here would turn a response of 0.02 into a fully tinted pixel
+        self._mask = None if mask is None else np.asarray(mask)
         if mask is None or not self._show_mask:
             self._overlay.setPixmap(QPixmap())
             return
-        m = np.asarray(mask, dtype=bool)
-        rgba = np.zeros(m.shape + (4,), dtype=np.uint8)
-        rgba[m] = (60, 180, 255, 255)
+        a = np.clip(np.asarray(mask, dtype=float), 0.0, 1.0)
+        rgba = np.zeros(a.shape + (4,), dtype=np.uint8)
+        rgba[..., :3] = colour
+        rgba[..., 3] = np.round(a * 255).astype(np.uint8)
         rgba = np.ascontiguousarray(rgba)
         h, w, _ = rgba.shape
         img = QImage(rgba.data, w, h, 4 * w, QImage.Format_RGBA8888).copy()
         self._overlay.setPixmap(QPixmap.fromImage(img))
+
+    def set_overlay_opacity(self, value):
+        """How strongly the overlay covers the image, 0 to 1.
+
+        It multiplies the per-pixel alpha, so the array carries the shape of
+        what is drawn and this carries its strength. Keeping the two apart is
+        what makes changing the strength one call rather than a rebuild.
+        """
+        self._overlay.setOpacity(float(np.clip(value, 0.0, 1.0)))
 
     def toggle_mask(self):
         """Show or hide the mask overlay.
@@ -300,6 +321,35 @@ class ImageCanvas(QGraphicsView):
             self.fit()
 
     # ------------------------------------------------------------- markers
+    def set_outlines(self, lines, colour="#ffcc33", width=0.8):
+        """Draw polylines over the image, replacing any already there.
+
+        ``lines`` is a sequence of ``(n, 2)`` arrays of ``(x, y)`` scene
+        points, which is what a contour generator returns. Used to mark where
+        a filter response crosses a level, since a graded shading says how
+        much is passed but not where it effectively stops.
+        """
+        for item in self._outlines:
+            self.scene().removeItem(item)
+        self._outlines.clear()
+
+        pen = QPen(QColor(colour), float(width))
+        pen.setCosmetic(False)
+        for pts in lines:
+            pts = np.asarray(pts, dtype=float)
+            if len(pts) < 2:
+                continue
+            path = QPainterPath(QPointF(float(pts[0][0]), float(pts[0][1])))
+            for x, y in pts[1:]:
+                path.lineTo(QPointF(float(x), float(y)))
+            item = QGraphicsPathItem(path)
+            item.setPen(pen)
+            item.setBrush(QBrush(Qt.NoBrush))
+            # over the shading, under the draggable markers
+            item.setZValue(4)
+            self.scene().addItem(item)
+            self._outlines.append(item)
+
     def set_markers(self, markers, radius=4.0):
         """Show draggable points as ``(x, y, colour, label)`` tuples."""
         for item in self._markers:
@@ -554,6 +604,9 @@ class ImageCanvas(QGraphicsView):
         if self._marker_drag is not None:
             pos = self.mapToScene(event.position().toPoint())
             self.move_marker(self._marker_drag, pos.x(), pos.y())
+            # a listener may follow this live, but it must not rebuild the
+            # markers: set_markers destroys the item being dragged
+            self.markerDragged.emit(self._marker_drag, pos.x(), pos.y())
             return
         if self._drag is not None:
             pos = self.mapToScene(event.position().toPoint())

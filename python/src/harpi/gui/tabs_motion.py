@@ -179,10 +179,29 @@ class MotionTab(QWidget):
         self.bg = BackgroundControls()
         self.bg.changed.connect(self.refresh)
 
+        # Arrows are drawn at their true length by default, so what is on
+        # screen is the displacement in pixels and can be read against the
+        # image under it.
+        self.arrow_scale = QDoubleSpinBox()
+        self.arrow_scale.setRange(0.1, 20.0)
+        self.arrow_scale.setDecimals(1)
+        self.arrow_scale.setSingleStep(0.5)
+        self.arrow_scale.setValue(1.0)
+        self.arrow_scale.setPrefix("x ")
+        self.arrow_scale.setToolTip(
+            "How much longer than the displacement itself the arrows are "
+            "drawn. One is true length.")
+        self.arrow_scale.valueChanged.connect(lambda _: self.refresh())
+        arrow_form = QFormLayout()
+        arrow_form.addRow("arrow length", self.arrow_scale)
+        self.arrow_box = QGroupBox("Arrows")
+        self.arrow_box.setLayout(arrow_form)
+
         side.addWidget(self.run_btn)
         side.addWidget(self.cancel_btn)
         side.addWidget(self.progress)
         side.addWidget(self.flip_box)
+        side.addWidget(self.arrow_box)
         side.addWidget(self.bg)
         side.addWidget(QLabel("phase jumps (x2π), per frame:"))
         side.addWidget(self.jump_lbl)
@@ -191,8 +210,12 @@ class MotionTab(QWidget):
 
         self.plot = MplCanvas(7, 5)
         panel = QWidget(); panel.setLayout(side); panel.setMaximumWidth(320)
+        # the controls are taller than the window, as on the Strain tab
+        scroll = QScrollArea()
+        scroll.setWidget(panel); scroll.setWidgetResizable(True)
+        scroll.setMaximumWidth(340)
         lay = QHBoxLayout(self)
-        lay.addWidget(panel)
+        lay.addWidget(scroll)
         lay.addWidget(self.plot, 1)
 
     def _mark_edited(self, name):
@@ -403,8 +426,11 @@ class MotionTab(QWidget):
         draw_background(ax2, self.bg, self.session, fr, (r0, r1, c0, c1))
         # the arrows stay solid: they are line art covering almost no area,
         # and the image is already visible between them
+        # scale is data units per unit of arrow length, so the reciprocal of
+        # the exaggeration asked for: 1 draws the displacement itself
         ax2.quiver(xs, ys, ux[::step, ::step], uy[::step, ::step],
-                   color="#3a7fe8", scale_units="xy", angles="xy", scale=0.4,
+                   color="#3a7fe8", scale_units="xy", angles="xy",
+                   scale=1.0 / max(self.arrow_scale.value(), 1e-6),
                    zorder=2)
         ax2.set_aspect("equal")
         # Set the limits rather than inverting them. imshow already puts row 0

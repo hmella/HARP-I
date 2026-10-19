@@ -249,3 +249,36 @@ def test_no_dataset_means_no_background(qapp):
     tab = _tab_with(_radial(), qapp)
     assert tab.session.dataset is None
     assert not _images(tab)
+
+
+# ------------------------------------------------------- how long the arrows are
+
+def _lengths(tab):
+    u, v, _, _ = _arrows(tab)
+    good = np.isfinite(u) & np.isfinite(v)
+    return np.hypot(u[good], v[good])
+
+
+def test_the_arrows_are_drawn_at_their_true_length(qapp):
+    """So an arrow on screen is the displacement in pixels, readable against
+    the image under it."""
+    tab = _tab_with(_translation(3.0, 0.0), qapp)
+    assert tab.arrow_scale.value() == pytest.approx(1.0)
+    coll, _ = _quiver(tab)
+    assert coll.scale == pytest.approx(1.0)
+    assert np.nanmax(_lengths(tab)) == pytest.approx(3.0, rel=1e-6)
+
+
+def test_the_scale_control_lengthens_them(qapp):
+    tab = _tab_with(_translation(3.0, 0.0), qapp)
+    tab.arrow_scale.setValue(2.5)
+    coll, _ = _quiver(tab)
+    assert coll.scale == pytest.approx(1 / 2.5)
+
+
+def test_the_scale_control_does_not_change_the_data(qapp):
+    """It is how they are drawn, not what they are."""
+    tab = _tab_with(_translation(3.0, 0.0), qapp)
+    before = _lengths(tab).copy()
+    tab.arrow_scale.setValue(4.0)
+    assert np.allclose(before, _lengths(tab))

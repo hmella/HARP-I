@@ -222,3 +222,99 @@ def test_the_motion_overlay_box_redraws(window):
 def test_the_slice_thickness_row_is_not_shown(window):
     """It could never be enabled, the tab taking 2-D studies only."""
     assert not window.data_tab.pixel_size_slice.isVisible()
+
+
+# ------------------------------------- a result whose controls have moved
+
+def test_note_preview_says_so_without_dropping_anything():
+    """The third verb: invalidate_from drops and tells, note_settings always
+    tells, this one tells and keeps."""
+    from harpi.gui.session import Session, Stage
+
+    s = Session()
+    s.set_result(Stage.FILTER, "f")
+    s.set_result(Stage.MOTION, "m")
+    s.dirty = False
+    seen = []
+    s.previewChanged.connect(seen.append)
+
+    s.note_preview(Stage.FILTER)
+    assert seen == [int(Stage.FILTER)]
+    assert s.has(Stage.FILTER) and s.has(Stage.MOTION), "nothing was dropped"
+    assert not s.dirty, "nothing persisted changed"
+
+
+def test_the_header_marks_a_result_its_controls_have_moved_past(window):
+    """Only a tab that offers settings_match_result can reach this state, so
+    the rule is exercised through a stub rather than waiting for one."""
+    from harpi.gui.app import _STATE_ICON
+    from harpi.gui.session import Stage
+
+    def header():
+        for i, (stage, _) in enumerate(window._tabs):
+            if stage is Stage.FILTER:
+                return window.tabs.tabText(i)
+        raise AssertionError("no filtering tab")
+
+    window.filter_tab.run()
+    assert _STATE_ICON["done"] in header()
+
+    matches = [True]
+    window.filter_tab.settings_match_result = lambda: matches[0]
+    window._update_headers()
+    assert _STATE_ICON["done"] in header()
+
+    matches[0] = False
+    window._update_headers()
+    assert _STATE_ICON["edited"] in header(), header()
+
+    del window.filter_tab.settings_match_result
+    window._update_headers()
+    assert _STATE_ICON["done"] in header(), "a tab without the hook is unchanged"
+
+
+def test_a_tab_without_the_hook_is_never_marked_edited(window):
+    from harpi.gui.app import _STATE_ICON
+    from harpi.gui.session import Stage
+
+    window.filter_tab.run()
+    window.session.set_result(Stage.MOTION, "m")
+    window._update_headers()
+    for i, (stage, _) in enumerate(window._tabs):
+        if stage is Stage.MOTION:
+            assert _STATE_ICON["edited"] not in window.tabs.tabText(i)
+
+
+def test_the_motion_controls_are_reachable_in_the_default_window(window):
+    """They are taller than the window, so without a scroll area the banner
+    at the bottom is simply cut off."""
+    from PySide6.QtWidgets import QScrollArea
+
+    assert window.motion_tab.findChildren(QScrollArea), \
+        "the motion controls cannot be scrolled to"
+
+
+def test_the_arrow_scale_is_reachable_and_redraws(window):
+    """Pressed through the widget, so the connection is covered."""
+    import harpi
+    from harpi.gui.session import Stage
+
+    window.filter_tab.run()
+    ds = window.session.dataset
+    res = harpi.estimate_motion_2d(
+        window.session.result(Stage.FILTER)["image"], ds.mask,
+        a=ds.suggested_a, eta=15.0, njumps=2)
+    window.session.set_result(Stage.MOTION, res)
+    mt = window.motion_tab
+    mt.refresh()
+
+    def quiver_scale():
+        for ax in mt.plot.fig.axes:
+            for coll in ax.collections:
+                if hasattr(coll, "U"):
+                    return coll.scale
+        raise AssertionError("no arrows")
+
+    assert quiver_scale() == pytest.approx(1.0), "not true length by default"
+    mt.arrow_scale.setValue(3.0)
+    assert quiver_scale() == pytest.approx(1 / 3.0)

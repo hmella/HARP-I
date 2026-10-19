@@ -39,7 +39,10 @@ from .widgets import Navigator
 
 __all__ = ["MainWindow", "main"]
 
-_STATE_ICON = {"empty": "○", "done": "●", "stale": "◌"}
+# empty: nothing computed. done: a result that matches the controls.
+# edited: a result, but the controls have moved past it. stale: an earlier
+# stage is missing.
+_STATE_ICON = {"empty": "○", "done": "●", "edited": "◐", "stale": "◌"}
 
 
 class MainWindow(QMainWindow):
@@ -97,6 +100,7 @@ class MainWindow(QMainWindow):
 
         self._build_menus()
         self.session.stageChanged.connect(self._stage_changed)
+        self.session.previewChanged.connect(self._preview_changed)
         self.session.busyChanged.connect(self._busy_changed)
         self.tabs.currentChanged.connect(lambda _: self._refresh_current())
 
@@ -262,11 +266,14 @@ class MainWindow(QMainWindow):
         return f"{name}: {' | '.join(done) if done else 'loaded'}"
 
     def _update_headers(self):
-        for i, (stage, _) in enumerate(self._tabs):
+        for i, (stage, tab) in enumerate(self._tabs):
             if stage == Stage.SEGMENT:
                 state = "done" if self.session.mask is not None else "empty"
             elif self.session.has(stage):
-                state = "done"
+                # a tab that previews its controls says whether the result it
+                # holds is still the one they describe
+                matches = getattr(tab, "settings_match_result", None)
+                state = "done" if matches is None or matches() else "edited"
             elif self.session.ready_for(stage):
                 state = "empty"
             else:
@@ -278,6 +285,14 @@ class MainWindow(QMainWindow):
             n_slices = ds.image.shape[2] if ds.image.ndim == 5 else 1
             self.nav.set_extent(ds.n_frames, n_slices)
             self.motion_tab.sync_defaults()
+
+    def _preview_changed(self, _stage):
+        """A tab's controls moved past its result.
+
+        No refresh from here: the tab has already drawn itself, and
+        refreshing it would rebuild the markers under a drag in progress.
+        """
+        self._update_headers()
 
     def _refresh_current(self):
         w = self.tabs.currentWidget()

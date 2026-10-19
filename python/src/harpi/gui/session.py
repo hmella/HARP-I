@@ -43,7 +43,9 @@ class Stage(IntEnum):
 class Session(QObject):
     """Holds one configuration and one result per stage."""
 
-    stageChanged = Signal(int)       # a stage's result appeared or vanished
+    stageChanged = Signal(int)
+    previewChanged = Signal(int)
+    """A stage's controls moved past the result it holds."""       # a stage's result appeared or vanished
     busyChanged = Signal(bool)
     frameRequested = Signal(int)     # a tab asks to show a particular frame
     message = Signal(str)
@@ -124,6 +126,18 @@ class Session(QObject):
             self.dirty = True
             self.stageChanged.emit(int(stage))
         return changed
+
+    def note_preview(self, stage: Stage):
+        """A control moved, but this stage's result still stands.
+
+        Filtering shows what its controls would produce and commits only on
+        Apply, so an edit there must not drop a solved motion field. What has
+        changed is not that the result is wrong, only that the controls no
+        longer describe it, which the tab header shows and the tab says in
+        words. Nothing persisted changed either, so this does not mark the
+        session dirty.
+        """
+        self.previewChanged.emit(int(stage))
 
     def note_settings(self, stage: Stage):
         """A setting changed: drop later results, and say so either way.

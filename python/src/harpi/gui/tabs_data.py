@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -331,6 +332,25 @@ class DataTab(QWidget):
         self.canvas.fit(force=False)
 
 
+def _response_edge(response, level):
+    """Where a filter response crosses ``level``, as scene polylines.
+
+    contourpy comes with matplotlib, which is already required, and returns
+    ``(x, y)`` points, which is the canvas convention. A raster edge would
+    stair-step once the panel is zoomed.
+    """
+    peak = float(np.nanmax(response))
+    if not np.isfinite(peak) or peak <= 0:
+        return []
+    try:
+        from contourpy import contour_generator
+
+        return contour_generator(z=np.asarray(response, dtype=float)).lines(
+            level * peak)
+    except Exception:                                 # noqa: BLE001
+        return []
+
+
 class FilterTab(QWidget):
     """Choose the harmonic bandpass and show its effect in k-space."""
 
@@ -341,9 +361,31 @@ class FilterTab(QWidget):
         self.kind = QComboBox(); self.kind.addItems(["transmission", "butterworth"])
         self.cutoff = QDoubleSpinBox(); self.cutoff.setRange(1, 200); self.cutoff.setValue(17)
         self.order = QSpinBox(); self.order.setRange(1, 40); self.order.setValue(10)
-        for w in (self.kind, self.cutoff, self.order):
-            sig = w.currentTextChanged if isinstance(w, QComboBox) else w.valueChanged
-            sig.connect(self._changed)
+        self.kind.currentTextChanged.connect(self._kind_changed)
+        for w in (self.cutoff, self.order):
+            w.valueChanged.connect(self._controls_changed)
+        self.kind_note = QLabel()
+        self.kind_note.setWordWrap(True)
+
+        # How strongly the response covers the k-space it is drawn over.
+        self.shading = QSlider(Qt.Horizontal)
+        self.shading.setRange(0, 100)
+        self.shading.setValue(55)
+        self.shading_lbl = QLabel("55%")
+        self.shading.valueChanged.connect(self._shading_changed)
+
+        # Where the filter effectively stops. The shading says how much is
+        # passed; this says where that has fallen to almost nothing.
+        self.edge = QDoubleSpinBox()
+        self.edge.setRange(0.1, 50.0)
+        self.edge.setDecimals(1)
+        self.edge.setSingleStep(1.0)
+        self.edge.setValue(5.0)
+        self.edge.setSuffix(" %")
+        self.edge.setToolTip(
+            "A line is drawn where the response falls to this fraction of "
+            "its peak, as an amplitude rather than a power.")
+        self.edge.valueChanged.connect(lambda _: self._draw_preview())
 
         # Harmonic centre per encoding, in k-space pixels. The wave vector is
         # derived from it, so moving the centre moves the passband for either
@@ -362,6 +404,16 @@ class FilterTab(QWidget):
 
         self.freq_lbl = QLabel("-")
         self.freq_lbl.setWordWrap(True)
+        self.source_lbl = QLabel("-")
+        self.source_lbl.setWordWrap(True)
+
+        # the k-space of the raw frame depends on no control, so it is kept.
+        # The dataset is held by identity rather than by id(): a freed one can
+        # have its address reused, and the panel would then show the k-space
+        # of the series before last.
+        self._k_cache = None       # (encoding, frame, dataset, array)
+        self._mag_range = None
+        self._dragging = False
 
         self.auto_btn = QPushButton("Detect peaks again")
         self.auto_btn.clicked.connect(self.detect_centres)
@@ -375,6 +427,14 @@ class FilterTab(QWidget):
         form.addRow("kind", self.kind)
         form.addRow("cutoff", self.cutoff)
         form.addRow("order", self.order)
+        # spanning the row, so the wrapped text is given its full height
+        form.addRow(self.kind_note)
+        shade = QHBoxLayout()
+        shade.addWidget(self.shading)
+        shade.addWidget(self.shading_lbl)
+        holder = QWidget(); holder.setLayout(shade)
+        form.addRow("shading", holder)
+        form.addRow("edge at", self.edge)
 
         cform = QFormLayout()
         cform.addRow("encoding", self.encoding)
@@ -392,12 +452,14 @@ class FilterTab(QWidget):
         side.addWidget(box)
         side.addWidget(cbox)
         side.addWidget(self.apply)
+        side.addWidget(self.source_lbl)
         side.addWidget(self.banner)
         side.addStretch(1)
 
         self.k_before = ImageCanvas(session, "k-space")
         self.k_before.markers_draggable = True
         self.k_before.markerMoved.connect(self._centre_dragged)
+        self.k_before.markerDragged.connect(self._centre_dragging)
         self.k_after = ImageCanvas(session, "filtered")
         self.mag = ImageCanvas(session, "harmonic magnitude")
         grid = QHBoxLayout()
@@ -414,9 +476,178 @@ class FilterTab(QWidget):
         lay.addWidget(panel)
         lay.addLayout(grid, 1)
 
-    def _changed(self, *_):
-        if not self._syncing:
-            self.session.invalidate_from(Stage.FILTER)
+        # set, not merely connected: the constructed default is transmission,
+        # whose two bandpass boxes do not apply
+        self._update_kind_enablement()
+        self.k_before.set_overlay_opacity(self.shading.value() / 100.0)
+
+    # ---------------------------------------------------------- the preview
+
+    def _update_kind_enablement(self):
+        """Which bandpass controls apply. Enablement only, no side effects.
+
+        Kept apart from the redraw: a method that both sets enablement and
+        redraws, reached from a redraw, loops.
+        """
+        butterworth = self.kind.currentText() == "butterworth"
+        self.cutoff.setEnabled(butterworth)
+        self.order.setEnabled(butterworth)
+        self.kind_note.setText(
+            "" if butterworth else
+            "The transmission passband is set by the wave vector, so cutoff "
+            "and order do not apply to it.")
+
+    def _kind_changed(self, *_):
+        self._update_kind_enablement()
+        self._controls_changed()
+
+    def _shading_changed(self, value):
+        """Strength only, so this neither recomputes nor touches the stage."""
+        self.shading_lbl.setText(f"{value}%")
+        self.k_before.set_overlay_opacity(value / 100.0)
+
+    def _controls_changed(self, *_):
+        """A bandpass control moved: redraw, and say the result is behind."""
+        if self._syncing:
+            return
+        self._draw_preview()
+        self.session.note_preview(Stage.FILTER)
+
+    def _settings(self):
+        """What the controls say, as the stored result records it.
+
+        Cutoff and order are left out for the transmission window, which
+        takes neither, so moving them cannot mark a transmission result as
+        out of date.
+        """
+        kind = self.kind.currentText()
+        butterworth = kind == "butterworth"
+        return {
+            "kind": kind,
+            "cutoff": float(self.cutoff.value()) if butterworth else None,
+            "order": int(self.order.value()) if butterworth else None,
+            "centres": [[round(float(v), 6) for v in c] for c in self.centres],
+        }
+
+    def settings_match_result(self):
+        """Whether the applied filter is the one the controls describe."""
+        res = self.session.result(Stage.FILTER)
+        return res is not None and res.get("settings") == self._settings()
+
+    def _build_filter(self):
+        """The filter the controls on screen describe.
+
+        Both the preview and Apply go through this, so what is drawn is what
+        would be stored.
+        """
+        ds = self.session.dataset
+        if ds is None:
+            raise ValueError("Load a dataset first.")
+        if ds.image.ndim != 4:
+            raise ValueError("3-D filtering is not wired into the GUI yet.")
+        if not self.centres.any():
+            self.detect_centres()
+        if not self.centres.any():
+            # detect_centres draws, which comes back here, so this has to
+            # stop rather than ask again
+            raise ValueError("No harmonic peak was found. Set a centre by hand.")
+
+        shape = ds.image.shape[:2]
+        # Derive the frequency and the direction from the chosen centres, so
+        # the transmission filter (which uses the wave vectors) and the
+        # Butterworth filter (which uses the centre) both follow it.
+        omegas = [centre_to_frequency(self.centres[i], shape) for i in range(2)]
+        mags = [float(np.hypot(*w)) for w in omegas]
+        if min(mags) < 1e-6:
+            raise ValueError("A centre sits on DC. Move it onto the harmonic peak.")
+        direction = tuple(float(np.arctan2(w[1], w[0])) for w in omegas)
+        return HarpFilter2D(ds.image, mags, direction,
+                            kind=self.kind.currentText(),
+                            cutoff=self.cutoff.value(), order=self.order.value(),
+                            centre=np.round(self.centres).astype(int))
+
+    def preview(self):
+        """What the controls would produce, from one frame of one encoding.
+
+        Bitwise what Apply would store for that frame, since filter_plane is
+        the same arithmetic on the same slice, and 0.6 ms rather than the 52
+        ms of the whole series.
+        """
+        ds = self.session.dataset
+        enc = self._current_encoding()
+        fr = min(self.session.current_frame, ds.n_frames - 1)
+        flt = self._build_filter()
+
+        cached = self._k_cache
+        if cached is not None and cached[:2] == (enc, fr) and cached[2] is ds:
+            k = cached[3]
+        else:
+            k = np.log1p(np.abs(itok(ds.image[:, :, enc, fr])))
+            self._k_cache = (enc, fr, ds, k)
+
+        Ih = flt.filter_plane(ds.image[:, :, enc, fr], enc)
+        return {"filter": flt, "response": flt.response(enc), "k_before": k,
+                "k_after": np.log1p(np.abs(itok(Ih))), "magnitude": np.abs(Ih)}
+
+    def _draw_preview(self, markers=True):
+        """Paint the three panels from the controls on screen.
+
+        Never from the stored result: the point is to see what the settings
+        do before committing them. Guarded, because a handler reached on
+        every mouse move must not raise into the event loop.
+        """
+        if self.session.dataset is None:
+            self.banner.setText("Load a dataset first.")
+            return
+        try:
+            pv = self.preview()
+        except Exception as exc:                      # noqa: BLE001
+            # leave the panels as they were rather than blanking them
+            self.banner.setText(str(exc))
+            self.source_lbl.setText("-")
+            return
+
+        lo, hi = nan_range(pv["k_before"])
+        self.k_before.set_image(pv["k_before"], lo, hi)
+        self.k_before.set_mask_overlay(pv["response"])
+        self.k_before.set_outlines(_response_edge(pv["response"],
+                                                  self.edge.value() / 100.0))
+        # the same range as the panel beside it, so the suppression is
+        # visible instead of being normalised away, and so the greys do not
+        # pump while a marker is dragged
+        self.k_after.set_image(pv["k_after"], lo, hi)
+        if self._mag_range is None or not self._dragging:
+            self._mag_range = nan_range(pv["magnitude"])
+        self.mag.set_image(pv["magnitude"], *self._mag_range)
+
+        if markers:
+            self._draw_markers()
+        for c in (self.k_before, self.k_after, self.mag):
+            c.fit(force=False)
+        self._say_what_is_shown()
+
+    def _say_what_is_shown(self):
+        """Which filter is on screen, and whether it is the applied one."""
+        res = self.session.result(Stage.FILTER)
+        if res is None:
+            self.source_lbl.setText("live preview; nothing applied yet")
+            self.banner.setText(
+                "The panels show the filter the controls describe. Press "
+                "Apply filter to use it for the rest of the pipeline.")
+            return
+        if self.settings_match_result():
+            self.source_lbl.setText("showing the filter that was applied")
+            return
+        stored = res.get("settings") or {}
+        centres = stored.get("centres")
+        where = "" if centres is None else f" with centres {centres} (row, col)"
+        self.source_lbl.setText(
+            "preview only; the applied filter is the earlier one")
+        self.banner.setText(
+            f"The panels show the controls on screen. The applied filter, and "
+            f"everything solved from it, is still "
+            f"{stored.get('kind', 'the earlier one')}{where}. Press Apply "
+            f"filter to replace it.")
 
     # ------------------------------------------------------- harmonic centre
     def _current_encoding(self):
@@ -458,8 +689,25 @@ class FilterTab(QWidget):
         i = self._current_encoding()
         self.centres[i] = (self.c_row.value(), self.c_col.value())
         self._update_freq_label()
-        self.session.invalidate_from(Stage.FILTER)
-        self._draw_markers()
+        self._draw_preview()
+        self.session.note_preview(Stage.FILTER)
+
+    def _centre_dragging(self, index, x, y):
+        """A marker is moving, with the button still down.
+
+        Deliberately narrow. It must not call _draw_markers, because
+        set_markers destroys every marker item while the canvas holds an
+        index into the list being dragged, and it must not touch the session,
+        because that reaches _update_headers and, through any refresh, the
+        same rebuild. The release handler does both.
+        """
+        if self.session.dataset is None:
+            return
+        self._dragging = True
+        self.centres[index] = (y, x)
+        if index == self._current_encoding():
+            self._set_centre_boxes(self.centres[index])
+        self._draw_preview(markers=False)
 
     def _centre_dragged(self, index, x, y):
         """A marker was dropped, so x is the column and y the row."""
@@ -468,12 +716,9 @@ class FilterTab(QWidget):
         self.centres[index] = (y, x)
         if index == self._current_encoding():
             self._set_centre_boxes(self.centres[index])
-        self.session.invalidate_from(Stage.FILTER)
-        self.banner.setText(
-            f"Encoding {index + 1} centre moved to "
-            f"row {y:.1f}, col {x:.1f}. Press Apply filter."
-        )
-        self._draw_markers()
+        self._dragging = False
+        self._draw_preview()
+        self.session.note_preview(Stage.FILTER)
 
     def detect_centres(self):
         """Locate the harmonic peaks from the data."""
@@ -495,9 +740,9 @@ class FilterTab(QWidget):
             self.centres[i] = harmonic_center(itok(ds.image[:, :, i, 0]), omega,
                                               (2, 2), shape, centre)
         self._set_centre_boxes(self.centres[self._current_encoding()])
-        self.session.invalidate_from(Stage.FILTER)
+        self._draw_preview()
+        self.session.note_preview(Stage.FILTER)
         self.banner.setText(f"Peaks at {self.centres.round(1).tolist()} (row, col).")
-        self._draw_markers()
 
     def _measured_centres(self):
         """Harmonic peaks measured when the series was read, if any.
@@ -533,9 +778,9 @@ class FilterTab(QWidget):
                 self.centres[i] = frequency_to_centre(omega, shape)
             note = "Centres reset to the nominal tag frequency."
         self._set_centre_boxes(self.centres[self._current_encoding()])
-        self.session.invalidate_from(Stage.FILTER)
+        self._draw_preview()
+        self.session.note_preview(Stage.FILTER)
         self.banner.setText(note)
-        self._draw_markers()
 
     def _draw_markers(self):
         """Show both centres, the selected one highlighted."""
@@ -549,74 +794,35 @@ class FilterTab(QWidget):
         ])
 
     def run(self):
-        ds = self.session.dataset
-        if ds is None:
-            self.banner.setText("Load a dataset first.")
-            return
-        if ds.image.ndim != 4:
-            self.banner.setText("3-D filtering is not wired into the GUI yet.")
-            return
-        if not self.centres.any():
-            self.detect_centres()
-
-        shape = ds.image.shape[:2]
-        # Derive the frequency and the direction from the chosen centres, so
-        # the transmission filter (which uses the wave vectors) and the
-        # Butterworth filter (which uses the centre) both follow it.
-        omegas = [centre_to_frequency(self.centres[i], shape) for i in range(2)]
-        mags = [float(np.hypot(*w)) for w in omegas]
-        if min(mags) < 1e-6:
-            self.banner.setText("A centre sits on DC. Move it onto the harmonic peak.")
-            return
-        direction = tuple(float(np.arctan2(w[1], w[0])) for w in omegas)
-
+        """Apply the filter the controls describe to the whole series."""
         try:
-            flt = HarpFilter2D(ds.image, mags, direction, kind=self.kind.currentText(),
-                               cutoff=self.cutoff.value(), order=self.order.value(),
-                               centre=np.round(self.centres).astype(int))
-            Ih = flt(ds.image)
-        except Exception as exc:
+            flt = self._build_filter()
+            Ih = flt(self.session.dataset.image)
+        except ValueError as exc:
+            self.banner.setText(str(exc))
+            return
+        except Exception as exc:                      # noqa: BLE001
             self.banner.setText(f"Filtering failed: {exc}")
             return
-        self.session.set_result(Stage.FILTER, {"filter": flt, "image": Ih})
+        self.session.set_result(
+            Stage.FILTER,
+            {"filter": flt, "image": Ih, "settings": self._settings()})
+        self.refresh()
         self.banner.setText(
             "Filtered with centres at "
             f"{np.round(self.centres, 1).tolist()} (row, col)."
         )
-        self.refresh()
 
     def refresh(self):
-        ds = self.session.dataset
-        res = self.session.result(Stage.FILTER)
-        if ds is None:
+        """Draw the controls on screen, whether or not any filter is applied.
+
+        There is one drawing path, and it is the preview: the panels always
+        show what the settings would produce, which is the only way to judge
+        them before committing.
+        """
+        if self.session.dataset is None:
             return
         if not self.centres.any():
             self.detect_centres()
-
-        enc = self._current_encoding()
-        fr = min(self.session.current_frame, ds.n_frames - 1)
-        raw = ds.image[:, :, enc, fr]
-        k = np.log1p(np.abs(itok(raw)))
-        self.k_before.set_image(k, *nan_range(k))
-
-        # Shade where the filter passes, so the centre can be placed by eye.
-        if res is not None:
-            h = res["filter"].kspace_filter[:, :, enc]
-            self.k_before.set_mask_overlay(h > 0.05 * h.max())
-        else:
-            self.k_before.set_mask_overlay(None)
-
-        self._draw_markers()
-        self.k_before.fit(force=False)
-
-        if res is None:
-            self.k_after.set_image(np.zeros_like(k), 0, 1)
-            self.mag.set_image(np.zeros_like(k), 0, 1)
             return
-        Ih = res["image"][:, :, enc, fr]
-        kf = np.log1p(np.abs(itok(Ih)))
-        self.k_after.set_image(kf, *nan_range(kf))
-        self.k_after.fit(force=False)
-        m = np.abs(Ih)
-        self.mag.set_image(m, *nan_range(m))
-        self.mag.fit(force=False)
+        self._draw_preview()

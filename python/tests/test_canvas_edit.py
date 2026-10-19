@@ -298,3 +298,132 @@ def test_the_command_text_cannot_land_in_the_labels(canvas):
 
     with pytest.raises(TypeError, match="mapping"):
         SetContoursCommand(canvas, {canvas.key: []}, "clear frame")
+
+
+# ------------------------------------------------- a graded overlay
+
+def _alpha(canvas, x, y):
+    """Alpha of one pixel of the overlay, as painted."""
+    img = canvas._overlay.pixmap().toImage()
+    return img.pixelColor(int(x), int(y)).alpha()
+
+
+@pytest.fixture
+def plain(qapp):
+    """A canvas with an image but nothing drawn on it."""
+    sess = Session()
+    sess.dataset = Dataset2D(image=np.zeros((8, 8, 2, 2)),
+                             mask=np.ones((8, 8, 2)),
+                             pixel_size=[1.0, 1.0], tag_spacing=4.0)
+    c = ImageCanvas(sess, "k-space")
+    c.set_image(np.zeros((8, 8)), 0, 1)
+    return c
+
+
+def test_a_boolean_overlay_is_flat(plain):
+    """What it always did, kept exactly."""
+    m = np.zeros((8, 8), dtype=bool)
+    m[2:5, 2:5] = True
+    plain.set_mask_overlay(m)
+    assert _alpha(plain, 3, 3) == 255
+    assert _alpha(plain, 0, 0) == 0
+    img = plain._overlay.pixmap().toImage()
+    c = img.pixelColor(3, 3)
+    assert (c.red(), c.green(), c.blue()) == (60, 180, 255)
+
+
+def test_a_float_overlay_is_graded(plain):
+    """Which is what shows a filter rolloff rather than its support."""
+    a = np.zeros((8, 8))
+    a[1, 1], a[2, 2], a[3, 3] = 0.0, 0.5, 1.0
+    plain.set_mask_overlay(a)
+    assert _alpha(plain, 1, 1) == 0
+    assert _alpha(plain, 3, 3) == 255
+    assert 120 <= _alpha(plain, 2, 2) <= 135, "a half value is half opaque"
+
+
+def test_a_float_overlay_clamps(plain):
+    plain.set_mask_overlay(np.array([[-1.0, 2.0], [0.5, 0.0]]))
+    assert _alpha(plain, 0, 0) == 0
+    assert _alpha(plain, 1, 0) == 255
+
+
+def test_the_overlay_is_remembered_undecorated(plain):
+    """Storing it as bool would turn a response of 0.02 into a solid pixel."""
+    a = np.full((8, 8), 0.02)
+    plain.set_mask_overlay(a)
+    assert plain._mask.dtype != bool
+    assert np.array_equal(plain._mask, a)
+
+
+def test_toggling_restores_a_graded_overlay(plain):
+    a = np.linspace(0, 1, 64).reshape(8, 8)
+    plain.set_mask_overlay(a)
+    before = _alpha(plain, 4, 4)
+    plain.toggle_mask()
+    assert plain._overlay.pixmap().isNull()
+    plain.toggle_mask()
+    assert _alpha(plain, 4, 4) == before
+
+
+def test_the_overlay_opacity_reaches_the_item(plain):
+    plain.set_overlay_opacity(0.8)
+    assert plain._overlay.opacity() == pytest.approx(0.8)
+
+
+def test_the_overlay_opacity_clamps(plain):
+    plain.set_overlay_opacity(5.0)
+    assert plain._overlay.opacity() == pytest.approx(1.0)
+    plain.set_overlay_opacity(-2.0)
+    assert plain._overlay.opacity() == pytest.approx(0.0)
+
+
+# ------------------------------------------------- dragging a marker
+
+def _mouse(canvas, kind, x, y):
+    """Send a real mouse event at a scene position, not call the handler."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    pos = canvas.mapFromScene(QPointF(float(x), float(y)))
+    ev = QMouseEvent(kind, QPointF(pos), QPointF(pos),
+                     Qt.LeftButton,
+                     Qt.LeftButton if kind != QEvent.MouseButtonRelease
+                     else Qt.NoButton,
+                     Qt.NoModifier)
+    QApplication.sendEvent(canvas.viewport(), ev)
+
+
+@pytest.fixture
+def marked(plain):
+    plain.markers_draggable = True
+    plain.set_markers([(4.0, 4.0, "#e8503a", "one")])
+    plain.resize(200, 200)
+    plain.fit()
+    return plain
+
+
+def test_dragging_a_marker_reports_every_move(marked):
+    from PySide6.QtCore import QEvent
+
+    moves, released = [], []
+    marked.markerDragged.connect(lambda i, x, y: moves.append((i, x, y)))
+    marked.markerMoved.connect(lambda i, x, y: released.append((i, x, y)))
+
+    _mouse(marked, QEvent.MouseButtonPress, 4.0, 4.0)
+    _mouse(marked, QEvent.MouseMove, 5.0, 4.0)
+    _mouse(marked, QEvent.MouseMove, 6.0, 4.0)
+    assert len(moves) >= 2, "nothing was reported while dragging"
+    assert not released, "release fired early"
+
+    _mouse(marked, QEvent.MouseButtonRelease, 6.0, 4.0)
+    assert len(released) == 1
+
+
+def test_a_marker_that_is_not_dragged_reports_nothing(marked):
+    from PySide6.QtCore import QEvent
+
+    moves = []
+    marked.markerDragged.connect(lambda *a: moves.append(a))
+    _mouse(marked, QEvent.MouseMove, 5.0, 5.0)
+    assert not moves

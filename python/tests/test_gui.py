@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PySide6", reason="GUI extra not installed")
 
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QEvent, Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from harpi.gui.canvas import AddContourCommand, DeleteContourCommand  # noqa: E402
@@ -112,11 +112,41 @@ def test_full_pipeline(window, dataset):
     assert gcs.min() < -0.05, "a contracting ventricle shortens circumferentially"
 
 
-def test_editing_a_filter_setting_clears_motion(window):
-    window.filter_tab.run()
+def test_editing_a_filter_setting_keeps_motion(window):
+    """Filtering previews its controls and commits on Apply, so twiddling a
+    dial must not throw away a solved pipeline. It used to.
+
+    This moves the kind, not the cutoff: cutoff does not apply to the
+    transmission window and is left out of the recorded settings, so nudging
+    it is correctly a no change, and setValue works on a disabled box, which
+    would make this pass for the wrong reason.
+    """
+    ft = window.filter_tab
+    ft.run()
     window.session.set_result(Stage.MOTION, "m")
-    window.filter_tab.cutoff.setValue(window.filter_tab.cutoff.value() + 1)
+    ft.kind.setCurrentText("butterworth")
+    assert window.session.has(Stage.MOTION), "a solved field was dropped"
+    assert window.session.has(Stage.FILTER)
+    assert not ft.settings_match_result(), "the result is behind the controls"
+
+
+def test_applying_a_filter_clears_motion(window):
+    """What Apply still does, because the harmonic image really changed."""
+    ft = window.filter_tab
+    ft.run()
+    window.session.set_result(Stage.MOTION, "m")
+    ft.kind.setCurrentText("butterworth")
+    ft.run()
     assert not window.session.has(Stage.MOTION)
+    assert ft.settings_match_result()
+
+
+def test_a_dead_setting_does_not_mark_the_result_behind(window):
+    """Cutoff and order do nothing to the transmission window."""
+    ft = window.filter_tab
+    ft.run()
+    ft.cutoff.setValue(ft.cutoff.value() + 3)
+    assert ft.settings_match_result()
 
 
 def test_tab_headers_show_state(window):
@@ -535,21 +565,26 @@ def test_dragging_a_marker_updates_the_boxes(window):
     assert np.allclose(ft.centres[0], [77.25, 123.5])
 
 
-def test_moving_a_centre_invalidates_the_filter(window):
+def test_moving_a_centre_keeps_the_applied_filter(window):
+    """The panels follow the new centre at once; what was applied stands
+    until Apply is pressed again."""
     ft = window.filter_tab
     ft.refresh()
     ft.run()
     assert window.session.has(Stage.FILTER)
     ft.c_col.setValue(ft.c_col.value() + 2)
-    assert not window.session.has(Stage.FILTER)
+    assert window.session.has(Stage.FILTER)
+    assert not ft.settings_match_result()
+    assert "Apply" in ft.banner.text()
 
 
-def test_dragging_invalidates_the_filter(window):
+def test_dragging_keeps_the_applied_filter(window):
     ft = window.filter_tab
     ft.refresh()
     ft.run()
     ft._centre_dragged(0, ft.centres[0][1] + 4, ft.centres[0][0])
-    assert not window.session.has(Stage.FILTER)
+    assert window.session.has(Stage.FILTER), "the applied filter was dropped"
+    assert not ft.settings_match_result()
 
 
 def test_the_encoding_selector_shows_the_right_centre(window):
@@ -1220,3 +1255,307 @@ def test_a_loaded_mask_survives_a_resolution_change(window, tmp_path):
     st = w2.segment_tab
     st.resolution.setValue(st.resolution.value() - 0.1)
     assert w2.session.mask is not None, "wiped by the resolution change"
+
+
+# ------------------------------------------- the filter previews its controls
+
+def test_the_panels_preview_before_anything_is_applied(window):
+    """The shading used to appear only after Apply and vanish on the next
+    edit, so it was absent exactly while the filter was being chosen."""
+    ft = window.filter_tab
+    ft.refresh()
+    assert not window.session.has(Stage.FILTER)
+    assert ft.k_before._mask is not None, "nothing shaded"
+    assert not ft.k_after._pix.pixmap().isNull(), "the result panel is blank"
+    assert not ft.mag._pix.pixmap().isNull()
+    assert "preview" in ft.source_lbl.text()
+
+
+def test_the_shading_is_the_response_not_a_threshold(window):
+    ft = window.filter_tab
+    ft.refresh()
+    shaded = ft.k_before._mask
+    assert shaded.dtype != bool, "a threshold again"
+    assert np.array_equal(shaded, ft.preview()["response"])
+    between = (shaded > 0.01) & (shaded < 0.99)
+    assert between.any(), "no rolloff is visible, only a support"
+
+
+def test_what_is_previewed_is_what_apply_stores(window):
+    """Bitwise. _build_filter serves both, and filter_plane is the same
+    arithmetic as filtering the series."""
+    ft = window.filter_tab
+    ft.refresh()
+    before = ft.preview()["magnitude"]
+    ft.run()
+    res = window.session.result(Stage.FILTER)
+    enc, fr = ft._current_encoding(), window.session.current_frame
+    assert np.array_equal(before, np.abs(res["image"][:, :, enc, fr]))
+
+
+def test_the_preview_follows_the_cutoff(window):
+    ft = window.filter_tab
+    ft.kind.setCurrentText("butterworth")
+    ft.refresh()
+    ft.cutoff.setValue(8)
+    narrow = ft.preview()["response"].copy()
+    ft.cutoff.setValue(40)
+    wide = ft.preview()["response"]
+    assert wide.sum() > narrow.sum(), "a wider cutoff passes no more"
+
+
+def test_the_preview_follows_the_centre(window):
+    ft = window.filter_tab
+    ft.refresh()
+    before = ft.preview()["response"].copy()
+    ft.c_col.setValue(ft.c_col.value() + 6)
+    assert not np.array_equal(before, ft.preview()["response"])
+
+
+def test_the_preview_follows_the_frame(window, dataset):
+    ft = window.filter_tab
+    ft.refresh()
+    first = ft.preview()["k_before"].copy()
+    window._navigate(0, dataset.n_frames - 1)
+    assert not np.array_equal(first, ft.preview()["k_before"])
+
+
+def test_the_two_k_space_panels_share_a_range(window):
+    """Giving the filtered panel its own percentiles renormalises it, so the
+    suppression the panel exists to show is scaled away."""
+    ft = window.filter_tab
+    ft.refresh()
+    pv = ft.preview()
+    assert pv["k_after"].max() < pv["k_before"].max(), "nothing was suppressed"
+
+
+def test_a_centre_on_dc_leaves_the_panels_alone(window, dataset):
+    ft = window.filter_tab
+    ft.refresh()
+    before = ft.k_before._mask.copy()
+    rows, cols = dataset.image.shape[:2]
+    ft._centre_dragged(0, cols / 2, rows / 2)
+    assert "DC" in ft.banner.text()
+    assert np.array_equal(before, ft.k_before._mask), "the panels were redrawn"
+
+
+def test_the_shading_slider_only_changes_the_strength(window):
+    ft = window.filter_tab
+    ft.run()
+    ft.shading.setValue(90)
+    assert ft.k_before._overlay.opacity() == pytest.approx(0.9)
+    assert "90%" in ft.shading_lbl.text()
+    assert ft.settings_match_result(), "a strength change is not a setting"
+
+
+def test_cutoff_and_order_are_disabled_for_transmission(window):
+    """Two of the three bandpass controls do nothing on this kind."""
+    ft = window.filter_tab
+    assert ft.kind.currentText() == "transmission"
+    assert not ft.cutoff.isEnabled(), "enabled on a freshly built tab"
+    assert not ft.order.isEnabled()
+    assert "wave vector" in ft.kind_note.text()
+    ft.kind.setCurrentText("butterworth")
+    assert ft.cutoff.isEnabled() and ft.order.isEnabled()
+    assert ft.kind_note.text() == ""
+    ft.kind.setCurrentText("transmission")
+    assert not ft.cutoff.isEnabled()
+
+
+# ---------------------------------------------- following a marker as it moves
+
+def _send(canvas, kind, x, y):
+    """A real mouse event at a scene position, not a call to the handler."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication as QA
+
+    pos = canvas.mapFromScene(QPointF(float(x), float(y)))
+    ev = QMouseEvent(kind, QPointF(pos), QPointF(pos), Qt.LeftButton,
+                     Qt.LeftButton if kind != QEvent.MouseButtonRelease
+                     else Qt.NoButton, Qt.NoModifier)
+    QA.sendEvent(canvas.viewport(), ev)
+
+
+def _ready_to_drag(window):
+    ft = window.filter_tab
+    ft.refresh()
+    ft.k_before.resize(300, 300)
+    ft.k_before.fit()
+    return ft
+
+
+def test_the_panels_follow_a_marker_before_it_is_dropped(window):
+    ft = _ready_to_drag(window)
+    row, col = ft.centres[0]
+    before = ft.preview()["response"].copy()
+
+    _send(ft.k_before, QEvent.MouseButtonPress, col, row)
+    _send(ft.k_before, QEvent.MouseMove, col + 8, row)
+    assert not np.array_equal(before, ft.preview()["response"]), \
+        "the filter did not follow the marker"
+    assert ft.c_col.value() == pytest.approx(col + 8, abs=1.0)
+    _send(ft.k_before, QEvent.MouseButtonRelease, col + 8, row)
+
+
+def test_dragging_does_not_rebuild_the_markers(window):
+    """set_markers destroys every marker item, and the canvas holds an index
+    into the list it is dragging. Rebuilding mid-drag is a dangling item."""
+    ft = _ready_to_drag(window)
+    row, col = ft.centres[0]
+    _send(ft.k_before, QEvent.MouseButtonPress, col, row)
+    held = ft.k_before._markers[0]
+    for step in (3, 6, 9):
+        _send(ft.k_before, QEvent.MouseMove, col + step, row)
+        assert ft.k_before._markers[0] is held, "the markers were rebuilt"
+    _send(ft.k_before, QEvent.MouseButtonRelease, col + 9, row)
+
+
+def test_dragging_does_not_touch_the_stage_until_release(window):
+    ft = _ready_to_drag(window)
+    ft.run()
+    row, col = ft.centres[0]
+    seen = []
+    window.session.previewChanged.connect(seen.append)
+
+    _send(ft.k_before, QEvent.MouseButtonPress, col, row)
+    _send(ft.k_before, QEvent.MouseMove, col + 5, row)
+    _send(ft.k_before, QEvent.MouseMove, col + 9, row)
+    assert not seen, "the session heard about an unfinished drag"
+
+    _send(ft.k_before, QEvent.MouseButtonRelease, col + 9, row)
+    assert seen, "the release was not reported"
+    assert not ft.settings_match_result()
+
+
+def test_the_magnitude_greys_hold_still_while_dragging(window):
+    """Rescaling on every move makes the panel pump as the marker crosses
+    the peak, which is the one thing the eye follows."""
+    ft = _ready_to_drag(window)
+    row, col = ft.centres[0]
+    _send(ft.k_before, QEvent.MouseButtonPress, col, row)
+    _send(ft.k_before, QEvent.MouseMove, col + 4, row)
+    held = ft._mag_range
+    _send(ft.k_before, QEvent.MouseMove, col + 12, row)
+    assert ft._mag_range == held
+    _send(ft.k_before, QEvent.MouseButtonRelease, col + 12, row)
+    assert not ft._dragging
+
+
+def test_a_new_dataset_is_not_shown_the_old_k_space(window, dataset):
+    """The cache was keyed on id(), and a freed dataset can have its address
+    reused, which would show the series before last."""
+    ft = window.filter_tab
+    ft.refresh()
+    first = ft.preview()["k_before"].copy()
+
+    from harpi import Dataset2D
+
+    rng = np.random.default_rng(7)
+    other = Dataset2D(image=rng.normal(size=dataset.image.shape),
+                      mask=dataset.mask, pixel_size=[2.0, 2.0],
+                      tag_spacing=dataset.tag_spacing)
+    window.session.dataset = other
+    assert not np.array_equal(first, ft.preview()["k_before"])
+
+
+def test_the_cache_holds_the_dataset_it_belongs_to(window):
+    ft = window.filter_tab
+    ft.refresh()
+    ft.preview()
+    assert ft._k_cache[2] is window.session.dataset
+
+
+def test_a_series_with_no_peak_is_refused_rather_than_looping(window):
+    """_build_filter asks detect_centres for a centre, and detect_centres
+    draws, which comes back here. It has to stop on the second miss."""
+    ft = window.filter_tab
+    ft.refresh()
+    ft.centres[:] = 0.0
+    ft.detect_centres = lambda: None          # a search that finds nothing
+    with pytest.raises(ValueError, match="by hand"):
+        ft._build_filter()
+
+
+# ------------------------------------------- where the filter effectively ends
+
+def test_an_edge_line_is_drawn_on_the_response(window):
+    """The shading says how much is passed; the line says where that has
+    fallen to almost nothing."""
+    ft = window.filter_tab
+    ft.refresh()
+    assert ft.k_before._outlines, "no edge was drawn"
+
+
+def test_the_edge_follows_its_level(window):
+    """A lower level is further out, so it encloses more."""
+    from harpi.gui.tabs_data import _response_edge
+
+    ft = window.filter_tab
+    ft.refresh()
+    h = ft.preview()["response"]
+
+    def extent(level):
+        lines = _response_edge(h, level)
+        assert lines, f"nothing at {level}"
+        pts = np.vstack(lines)
+        return np.ptp(pts[:, 0]) * np.ptp(pts[:, 1])
+
+    assert extent(0.01) > extent(0.20)
+
+
+def test_changing_the_level_redraws_the_edge(window):
+    ft = window.filter_tab
+    ft.refresh()
+    before = [i.path().elementCount() for i in ft.k_before._outlines]
+    ft.edge.setValue(25.0)
+    after = [i.path().elementCount() for i in ft.k_before._outlines]
+    assert before != after
+
+
+def test_the_edge_level_is_not_a_filter_setting(window):
+    """It is a thing drawn, so it cannot mark a result out of date."""
+    ft = window.filter_tab
+    ft.run()
+    ft.edge.setValue(12.0)
+    assert ft.settings_match_result()
+
+
+def test_the_edge_sits_where_the_response_crosses(window):
+    """Sampled back out of the response, the drawn line is at the level
+    asked for.
+
+    Except where it runs off the edge of k-space: a contour that leaves the
+    domain is closed along its border, and those points are on the boundary
+    rather than on the level.
+    """
+    from scipy.ndimage import map_coordinates
+
+    ft = window.filter_tab
+    ft.refresh()
+    h = ft.preview()["response"]
+    peak = float(np.nanmax(h))
+    level = 0.05 * peak
+
+    pts = []
+    for item in ft.k_before._outlines:
+        path = item.path()
+        pts += [[path.elementAt(k).x, path.elementAt(k).y]
+                for k in range(path.elementCount())]
+    pts = np.array(pts)
+    assert len(pts) > 50
+
+    rows, cols = h.shape
+    on_border = ((pts[:, 0] <= 0) | (pts[:, 0] >= cols - 1)
+                 | (pts[:, 1] <= 0) | (pts[:, 1] >= rows - 1))
+    inside = pts[~on_border]
+    assert len(inside) > 0.9 * len(pts), "the contour is mostly on the border"
+
+    got = map_coordinates(h, np.vstack([inside[:, 1], inside[:, 0]]), order=1)
+    assert np.allclose(got, level, atol=0.02 * peak)
+
+
+def test_a_flat_response_draws_no_edge():
+    from harpi.gui.tabs_data import _response_edge
+
+    assert _response_edge(np.zeros((8, 8)), 0.05) == []

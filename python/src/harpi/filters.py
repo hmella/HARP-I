@@ -75,9 +75,16 @@ def _transmission(shape, wave1, wave2):
 
 
 def _butterworth_2d(shape, centre, cutoff, order):
-    """Butterworth lowpass centred on the harmonic peak."""
+    """Butterworth lowpass centred on the harmonic peak.
+
+    ``centre`` is a zero-based ``(row, col)`` index and the response peaks on
+    it. ``HARPFilter.m:195`` grids from 1 against a centre that
+    ``getHarmonicCenter`` also counts from 1, which is the same statement in a
+    one-based language; keeping that grid here while feeding it a NumPy index
+    put the response one pixel up and to the left of the centre asked for.
+    """
     rows, cols = shape[0], shape[1]
-    ox, oy = np.meshgrid(np.arange(1, cols + 1), np.arange(1, rows + 1))
+    ox, oy = np.meshgrid(np.arange(cols), np.arange(rows))
     # centre arrives as (row, col)
     r = np.sqrt((ox - centre[1]) ** 2 + (oy - centre[0]) ** 2)
     H = 1.0 / (1.0 + (r / cutoff) ** (2 * order))
@@ -131,6 +138,9 @@ class HarpFilter2D:
         self.centre = np.asarray(centre, dtype=int)
 
         w1, w2 = self.wave_vectors
+        # The transmission window takes neither cutoff nor order: its
+        # passband is fixed by Z < 1 in the log-radial coordinate, so its
+        # width follows the wave vector alone.
         if self.kind == "transmission":
             h1 = _transmission(self.shape, w1, w2)
             h2 = _transmission(self.shape, w2, w1)
@@ -146,6 +156,29 @@ class HarpFilter2D:
 
     def __call__(self, image):
         return self.filter(image)
+
+    def response(self, encoding):
+        """The k-space response of one encoding, values in [0, 1]."""
+        return self.kspace_filter[:, :, int(encoding)]
+
+    def filter_plane(self, plane, encoding):
+        """Apply one encoding's response to a single frame.
+
+        The same arithmetic as :meth:`filter` on that slice, and bitwise equal
+        to it, which is what lets the interface show the effect of a setting
+        without filtering the whole series: 0.6 ms against 52 ms on the
+        bundled 2-D data.
+        """
+        plane = np.asarray(plane)
+        if plane.shape[:2] != self.shape:
+            raise ValueError(
+                f"plane is {plane.shape[:2]} but this filter was built for "
+                f"{self.shape}"
+            )
+        H = self.response(encoding)
+        if plane.ndim > 2:
+            H = H[..., np.newaxis]
+        return ktoi(H * itok(plane, axes=(0, 1)), axes=(0, 1))
 
     def filter(self, image):
         """Apply the filter, returning the complex harmonic image."""
