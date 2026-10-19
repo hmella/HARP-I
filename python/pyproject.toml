@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harpi"
+version = "0.1.0"
+description = "HARP-I: harmonic phase interpolation for motion and strain from tagged MR images"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MPL-2.0" }
+authors = [{ name = "Hernan Mella", email = "hernan.mella@pucv.cl" }]
+keywords = ["mri", "tagging", "cardiac", "strain", "motion", "harp"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "numba>=0.59",
+    "h5py>=3.8",
+    "pydicom>=2.4",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.6"]
+dev = ["pytest>=8", "pytest-cov", "ruff", "mypy"]
+
+[project.scripts]
+harpi = "harpi.cli:main"
+harpi-gui = "harpi.gui.app:main"
+
+[project.urls]
+Homepage = "https://github.com/hmella/HARP-I"
+Paper = "https://doi.org/10.1109/TMI.2021.3051092"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/harpi"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: end-to-end runs",
+    "matlab: needs the full MATLAB reference (not committed)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "NPY"]
