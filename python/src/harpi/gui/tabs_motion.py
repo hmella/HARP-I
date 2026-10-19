@@ -76,8 +76,8 @@ class MotionTab(QWidget):
         self.torder = QSpinBox(); self.torder.setRange(2, 20); self.torder.setValue(10)
         self.njumps = QSpinBox(); self.njumps.setRange(1, 16); self.njumps.setValue(8)
         self.jump_rule = QComboBox()
-        self.jump_rule.addItem("published", "published")
         self.jump_rule.addItem("nearest coordinate", "nearest")
+        self.jump_rule.addItem("published", "published")
         self.jump_rule.setToolTip(
             "How the 2π offset of each frame is chosen. The published rule "
             "compares the largest distance between virtual coordinates and "
@@ -106,9 +106,12 @@ class MotionTab(QWidget):
             w.toggled.connect(self._settings_changed)
         self.tfit.toggled.connect(self.torder.setEnabled)
         self.torder.setEnabled(self.tfit.isChecked())
-        # Only the published rule has a search budget.
-        self.jump_rule.currentIndexChanged.connect(
-            lambda _: self.njumps.setEnabled(self.jump_rule.currentData() == "published"))
+        # Only the published rule has a search budget. Set the state as well as
+        # connecting the signal: a connection alone leaves the initial state
+        # whatever the widget defaults to, which was right only while the
+        # published rule happened to be the first item in the box.
+        self.jump_rule.currentIndexChanged.connect(lambda _: self._sync_jump_budget())
+        self._sync_jump_budget()
 
         form = QFormLayout()
         form.addRow("kernel", self.kernel)
@@ -172,6 +175,9 @@ class MotionTab(QWidget):
         """Remember that a value was set by hand, so defaults leave it alone."""
         if not self._syncing:
             self._edited.add(name)
+
+    def _sync_jump_budget(self):
+        self.njumps.setEnabled(self.jump_rule.currentData() == "published")
 
     def _settings_changed(self, *_):
         """A solver setting changed, so the current solution is out of date."""
@@ -363,7 +369,11 @@ class MotionTab(QWidget):
         uy = u[r0:r1, c0:c1, 1, fr]
         step = max(crop.shape[0] // 30, 1)
         ys, xs = np.mgrid[0:crop.shape[0]:step, 0:crop.shape[1]:step]
-        ax2.quiver(xs, ys, ux[::step, ::step], -uy[::step, ::step],
+        # u[..., 1] is the displacement along rows, and invert_yaxis already
+        # makes the drawn y axis increase downwards to match them. Negating it
+        # as well flipped the arrows a second time, so a contraction fanned
+        # outwards top and bottom while converging left and right.
+        ax2.quiver(xs, ys, ux[::step, ::step], uy[::step, ::step],
                    color="#3a7fe8", scale_units="xy", angles="xy", scale=0.4)
         ax2.set_aspect("equal"); ax2.invert_yaxis(); ax2.axis("off")
         ax2.set_title("displacement")

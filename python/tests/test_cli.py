@@ -23,14 +23,14 @@ def _captured(argv):
     return seen
 
 
-def test_the_published_jump_rule_is_the_default(dataset):
+def test_the_nearest_jump_rule_is_the_default(dataset):
     seen = _captured(["process", str(_DATASET)])
-    assert seen["phase_jump_rule"] == "published"
+    assert seen["phase_jump_rule"] == "nearest"
 
 
 def test_the_jump_rule_reaches_the_solver(dataset):
-    seen = _captured(["process", str(_DATASET), "--phase-jump-rule", "nearest"])
-    assert seen["phase_jump_rule"] == "nearest"
+    seen = _captured(["process", str(_DATASET), "--phase-jump-rule", "published"])
+    assert seen["phase_jump_rule"] == "published"
 
 
 def test_an_unknown_jump_rule_is_refused(capsys):

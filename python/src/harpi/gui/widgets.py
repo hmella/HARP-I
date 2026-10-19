@@ -6,20 +6,48 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSlider,
     QSpinBox,
     QWidget,
 )
 
-__all__ = ["Navigator", "MplCanvas", "StageBanner", "mask_bbox", "nan_range"]
+__all__ = ["Navigator", "FrameSpin", "MplCanvas", "StageBanner",
+           "mask_bbox", "nan_range"]
+
+
+class FrameSpin(QSpinBox):
+    """A frame number: counted from zero inside, shown from one.
+
+    Every array axis here is zero based, and so is ``Navigator.frame.value()``,
+    but a frame called 0 on screen reads as a mistake.
+    """
+
+    def textFromValue(self, value):
+        return str(int(value) + 1)
+
+    def valueFromText(self, text):
+        try:
+            return int(text) - 1
+        except ValueError:
+            return self.value()
+
+    def validate(self, text, pos):
+        if not text:
+            return QValidator.Intermediate, text, pos
+        if not text.isdigit():
+            return QValidator.Invalid, text, pos
+        n = int(text)
+        if 1 <= n <= self.maximum() + 1:
+            return QValidator.Acceptable, text, pos
+        return QValidator.Intermediate, text, pos
 
 
 class Navigator(QWidget):
-    """Frame slider plus optional slice spinner, shared by every tab."""
+    """Frame buttons plus optional slice spinner, shared by every tab."""
 
     changed = Signal(int, int)       # slice, frame
 
@@ -28,27 +56,57 @@ class Navigator(QWidget):
         self.n_frames = 1
         self.n_slices = 1
 
-        self.frame = QSlider(Qt.Horizontal)
+        self.frame = FrameSpin()
         self.frame.setMinimum(0)
+        self.frame.setToolTip("Frame number. Type one to jump to it.")
         self.frame.valueChanged.connect(self._emit)
         self.frame_label = QLabel("frame 1/1")
         self.frame_label.setMinimumWidth(90)
+
+        # Stepping one frame at a time is what this is mostly used for, so it
+        # gets buttons rather than a slider, which was easy to overshoot.
+        # The ends get a double triangle against a bar, the steps a single
+        # triangle. An earlier set used |◀ for first and ▶| for next, which are
+        # mirror images of each other and read as the same control reversed.
+        self.first = QPushButton("|◀◀")
+        self.prev = QPushButton("◀")
+        self.next = QPushButton("▶")
+        self.last = QPushButton("▶▶|")
+        for b, tip, step in ((self.first, "First frame (Home)", None),
+                             (self.prev, "Previous frame ([)", -1),
+                             (self.next, "Next frame (])", +1),
+                             (self.last, "Last frame (End)", None)):
+            b.setFixedWidth(42)
+            b.setToolTip(tip)
+            b.setAutoRepeat(True)
+            b.setAutoRepeatDelay(300)
+            b.setAutoRepeatInterval(80)
+            if step is not None:
+                b.clicked.connect(lambda _=False, d=step: self.step_frame(d))
+        self.first.clicked.connect(lambda: self.frame.setValue(0))
+        self.last.clicked.connect(lambda: self.frame.setValue(self.n_frames - 1))
 
         self.slice = QSpinBox()
         self.slice.setMinimum(0)
         self.slice.valueChanged.connect(self._emit)
         self.slice_label = QLabel("slice")
 
-        self.play = QPushButton("▶")
+        # Spelled out, because a triangle here would be the next-frame glyph.
+        self.play = QPushButton("Play")
         self.play.setCheckable(True)
-        self.play.setFixedWidth(32)
+        self.play.setFixedWidth(58)
         self.play.setToolTip("Play / pause (Space)")
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.play)
+        lay.addWidget(self.first)
+        lay.addWidget(self.prev)
+        lay.addWidget(self.frame)
+        lay.addWidget(self.next)
+        lay.addWidget(self.last)
         lay.addWidget(self.frame_label)
-        lay.addWidget(self.frame, 1)
+        lay.addStretch(1)
         lay.addWidget(self.slice_label)
         lay.addWidget(self.slice)
         self.set_extent(1, 1)
@@ -58,6 +116,10 @@ class Navigator(QWidget):
         self.n_slices = max(int(n_slices), 1)
         self.frame.setMaximum(self.n_frames - 1)
         self.slice.setMaximum(self.n_slices - 1)
+        single = self.n_frames <= 1
+        for b in (self.first, self.prev, self.next, self.last, self.play):
+            b.setEnabled(not single)
+        self.frame.setEnabled(not single)
         has_slices = self.n_slices > 1
         self.slice.setVisible(has_slices)
         self.slice_label.setVisible(has_slices)

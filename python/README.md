@@ -102,21 +102,42 @@ completed on each frame, and the phase jumps picked by the consistency step.
 
 The phase jump of a frame is the whole number of periods, one per tag
 direction, that unwrapping leaves undetermined. The **jump rule** box on the
-Motion tab chooses how it is found. The *published* rule, the default and the
-one in the MATLAB toolbox, compares the largest distance between the virtual
-coordinates of the frame and those of the reference, searching the number of
-steps set in *jump search*. The *nearest coordinate* rule starts from the
-difference of the mean coordinates and keeps the offset that brings the
-coordinates of the frame closest to reference ones. It is steadier when the
-mask of a frame does not hold exactly the tissue of the reference mask. It is
-available for 2-D data in the Python port only, from the library as
+Motion tab chooses how it is found.
+
+The *nearest coordinate* rule is the default. It starts from the difference of
+the mean virtual coordinates and keeps the offset that brings the coordinates of
+the frame closest to reference ones, using all of them.
+
+The *published* rule is the one in the MATLAB toolbox. It reduces each frame to
+the largest distance between its virtual coordinates and the reference ones, and
+searches the number of steps set in *jump search*. That distance changes by only
+a fraction of a period between neighbouring candidates when the mask of a frame
+does not hold exactly the tissue of the reference mask, so a whole frame can
+land one period out. On the bundled `data_2D.mat` it does: six of eighteen
+frames are a period off in x, and the median x displacement jumps by 3.96 px
+against a 4 px tag period, where the true excursion is about 1.3 px. The nearest
+rule keeps the largest step to 0.69 px.
+
+It is kept because it reproduces the published results and because the
+zero-tolerance MATLAB regression is written against it, not because it is
+recommended.
+
+Worth knowing before reading too much into the change: strain is a spatial
+derivative, so a whole-period offset of one frame largely cancels in it. On
+`data_2D.mat` the two rules give global circumferential strain within about six
+per cent of peak of each other. The difference that matters is in the
+displacement field and in anything built directly on it, such as trajectories
+or a through-plane measure.
+
+Either rule is available in 2-D and 3-D, from the library as
 
 ```python
 res = harpi.estimate_motion_2d(flt(ds.image), ds.mask, a=ds.suggested_a,
-                               phase_jump_rule="nearest")
+                               phase_jump_rule="published")
 ```
 
-and from the shell as `harpi process --phase-jump-rule nearest`.
+and from the shell as `harpi process --phase-jump-rule published`. The rule used
+is recorded in `res.meta["phase_jump_rule"]` and printed by `harpi process`.
 
 The Motion tab has a **Displacement components** box with *swap x and y*,
 *flip x* and *flip y*. The sign and the order of the components follow the

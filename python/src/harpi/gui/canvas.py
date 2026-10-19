@@ -190,6 +190,13 @@ class ImageCanvas(QGraphicsView):
         self.key = (0, 0)
         self.editable = False
         self._drawing = None
+        # Points taken off the contour being drawn, so Ctrl+Z and Ctrl+Shift+Z
+        # step through the nodes before the contour is committed.
+        self._undone_points = []
+        # The item under the cursor, with the pen and brush to put back.
+        self._hover = None
+        self._hover_style = None
+        self.setMouseTracking(True)
         self._drag = None
         self._show_mask = True
         self._user_zoomed = False
@@ -360,6 +367,9 @@ class ImageCanvas(QGraphicsView):
 
     # -------------------------------------------------------------- render
     def refresh(self):
+        # The highlighted item is about to be destroyed, so forget it first.
+        self._hover = None
+        self._hover_style = None
         for it in self._items:
             self.scene().removeItem(it)
         self._items.clear()
@@ -401,6 +411,55 @@ class ImageCanvas(QGraphicsView):
                     self.scene().addItem(h)
                     self._items.append(h)
 
+    # ------------------------------------------------------------- hover
+    def _clear_hover(self):
+        """Put back the pen and brush of whatever was highlighted."""
+        if self._hover is not None and self._hover_style is not None:
+            pen, brush, rect = self._hover_style
+            try:
+                self._hover.setPen(pen)
+                if brush is not None:
+                    self._hover.setBrush(brush)
+                if rect is not None:
+                    self._hover.setRect(rect)
+            except RuntimeError:
+                pass          # the item went with a refresh
+        self._hover = None
+        self._hover_style = None
+
+    def _set_hover(self, item):
+        """Highlight the node or contour under the cursor."""
+        if item is self._hover:
+            return
+        self._clear_hover()
+        if item is None:
+            self.unsetCursor()
+            return
+
+        if isinstance(item, QGraphicsEllipseItem) and item.data(0) is not None:
+            rect = item.rect()
+            self._hover_style = (item.pen(), item.brush(), rect)
+            grown = rect.adjusted(-self.HANDLE / 3, -self.HANDLE / 3,
+                                  self.HANDLE / 3, self.HANDLE / 3)
+            item.setRect(grown)
+            item.setPen(QPen(Qt.white, 0.5))
+            self.setCursor(Qt.OpenHandCursor)
+        elif isinstance(item, QGraphicsPathItem):
+            pen = item.pen()
+            self._hover_style = (pen, None, None)
+            wide = QPen(pen)
+            wide.setWidthF(pen.widthF() * 2.5)
+            item.setPen(wide)
+            self.setCursor(Qt.PointingHandCursor)
+        else:
+            self.unsetCursor()
+            return
+        self._hover = item
+
+    def leaveEvent(self, event):
+        self._clear_hover()
+        super().leaveEvent(event)
+
     # -------------------------------------------------------------- events
     def wheelEvent(self, event):
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
@@ -431,6 +490,7 @@ class ImageCanvas(QGraphicsView):
                 return
             if self._drawing is not None:
                 self._drawing.append([pos.x(), pos.y()])
+                self._undone_points.clear()
                 self.session.contours[self.key][-1] = np.array(self._drawing)
                 self.refresh()
                 return
@@ -446,6 +506,9 @@ class ImageCanvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._drag is None and self._marker_drag is None and self.editable:
+            pos = self.mapToScene(event.position().toPoint())
+            self._set_hover(self.scene().itemAt(pos, self.transform()))
         if self._marker_drag is not None:
             pos = self.mapToScene(event.position().toPoint())
             self.move_marker(self._marker_drag, pos.x(), pos.y())
@@ -477,8 +540,33 @@ class ImageCanvas(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     # -------------------------------------------------------------- drawing
+    def undo_last_point(self) -> bool:
+        """Take the last node off the contour being drawn.
+
+        A contour in progress is not on the undo stack yet, so Ctrl+Z would
+        otherwise skip past every node just placed and undo whatever came
+        before. Returns False when nothing is being drawn, so the caller can
+        fall through to the stack.
+        """
+        if self._drawing is None or not self._drawing:
+            return False
+        self._undone_points.append(self._drawing.pop())
+        self.session.contours[self.key][-1] = np.array(self._drawing)
+        self.refresh()
+        return True
+
+    def redo_last_point(self) -> bool:
+        """Put back a node taken off by :meth:`undo_last_point`."""
+        if self._drawing is None or not self._undone_points:
+            return False
+        self._drawing.append(self._undone_points.pop())
+        self.session.contours[self.key][-1] = np.array(self._drawing)
+        self.refresh()
+        return True
+
     def start_contour(self, label="other"):
         self._drawing = []
+        self._undone_points.clear()
         self._drawing_label = label or "other"
         self.session.contours.setdefault(self.key, []).append(np.zeros((0, 2)))
         self.session.labels.setdefault(self.key, []).append(self._drawing_label)
@@ -497,6 +585,7 @@ class ImageCanvas(QGraphicsView):
         if labels:
             labels.pop()
         self._drawing = None
+        self._undone_points.clear()
         if len(pts) >= 3:
             self.undo_stack.push(AddContourCommand(self, pts, label))
             return True
@@ -512,4 +601,5 @@ class ImageCanvas(QGraphicsView):
             if labels:
                 labels.pop()
             self._drawing = None
+            self._undone_points.clear()
             self.refresh()

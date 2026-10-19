@@ -234,3 +234,49 @@ def test_a_refusal_leaves_an_earlier_dataset_alone(tab):
     good = tab.session.dataset
     tab._adopt(_ds3(), "volume")
     assert tab.session.dataset is good
+
+
+# -------------------------------------------------- the jump rule in 3-D
+
+def test_both_jump_rules_are_accepted_in_3d():
+    """The nearest rule is dimension generic, so 3-D is not a special case."""
+    image, mask, spacing = _volume(rows=20, cols=20, slices=4, nfr=3)
+    kw = dict(a=150 / spacing, downsample=2)
+    for rule in ("nearest", "published"):
+        res = estimate_motion_3d(image, mask, phase_jump_rule=rule, **kw)
+        assert res.meta["phase_jump_rule"] == rule
+
+
+def test_the_nearest_rule_is_the_default_in_3d():
+    """2-D and 3-D must not disagree about what the default means."""
+    image, mask, spacing = _volume(rows=20, cols=20, slices=4, nfr=3)
+    res = estimate_motion_3d(image, mask, a=150 / spacing, downsample=2)
+    assert res.meta["phase_jump_rule"] == "nearest"
+
+
+def test_the_rules_agree_when_no_frame_is_a_period_out():
+    """Small motion leaves nothing to disagree about, which is the sanity check
+    available without a 3-D reference to compare against."""
+    image, mask, spacing = _volume(rows=20, cols=20, slices=4, nfr=3,
+                                   contraction=0.02)
+    kw = dict(a=150 / spacing, downsample=2)
+    a = estimate_motion_3d(image, mask, phase_jump_rule="nearest", **kw)
+    b = estimate_motion_3d(image, mask, phase_jump_rule="published", **kw)
+    assert np.array_equal(a.phase_jumps, b.phase_jumps)
+    both = np.isfinite(a.u) & np.isfinite(b.u)
+    assert np.allclose(a.u[both], b.u[both])
+
+
+def test_an_unknown_rule_is_still_refused_in_3d():
+    image, mask, spacing = _volume(rows=12, cols=12, slices=3, nfr=2)
+    with pytest.raises(ValueError, match="phase_jump_rule"):
+        estimate_motion_3d(image, mask, a=150 / spacing, phase_jump_rule="centroid")
+
+
+def test_the_search_budget_is_ignored_by_the_nearest_rule_in_3d():
+    """njumps is accepted and has no effect, as in 2-D."""
+    image, mask, spacing = _volume(rows=20, cols=20, slices=4, nfr=3)
+    kw = dict(a=150 / spacing, downsample=2, phase_jump_rule="nearest")
+    a = estimate_motion_3d(image, mask, njumps=1, **kw)
+    b = estimate_motion_3d(image, mask, njumps=12, **kw)
+    assert np.array_equal(a.phase_jumps, b.phase_jumps)

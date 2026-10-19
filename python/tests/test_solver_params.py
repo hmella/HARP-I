@@ -79,15 +79,15 @@ def test_the_reference_frame_is_capped_at_the_frame_count(motion):
     assert motion.reference.maximum() == motion.session.dataset.n_frames
 
 
-def test_the_published_jump_rule_is_the_default(motion):
+def test_the_nearest_jump_rule_is_the_default(motion):
     seen = _captured(motion)
-    assert seen["phase_jump_rule"] == "published"
+    assert seen["phase_jump_rule"] == "nearest"
 
 
 def test_the_jump_rule_reaches_the_solver(motion):
-    motion.jump_rule.setCurrentIndex(motion.jump_rule.findData("nearest"))
+    motion.jump_rule.setCurrentIndex(motion.jump_rule.findData("published"))
     seen = _captured(motion)
-    assert seen["phase_jump_rule"] == "nearest"
+    assert seen["phase_jump_rule"] == "published"
 
 
 def test_connectivity_reaches_the_solver(motion, unwrap):

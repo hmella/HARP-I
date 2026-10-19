@@ -33,7 +33,7 @@ class MotionConfig:
     downsample: int = 1
     reference: int = 0
     njumps: int = 8
-    phase_jump_rule: str = "published"
+    phase_jump_rule: str = "nearest"
     """'published' (as in the MATLAB toolbox) or 'nearest' (2-D only)."""
 
 

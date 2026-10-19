@@ -254,18 +254,18 @@ def test_background_can_be_the_filtered_image(window):
     for i in range(st.background.count()):
         st.background.setCurrentIndex(i)
         st.refresh()
-        assert st.titles[0].text(), st.background.itemText(i)
-    st.background.setCurrentIndex(1)
+        assert st.title.text(), st.background.itemText(i)
+    st.background.setCurrentIndex(st.background.findData("harmonic"))
     st.refresh()
-    assert "harmonic" in st.titles[0].text()
+    assert "harmonic" in st.title.text()
 
 
 def test_filtered_background_falls_back_before_filtering(window):
     """Choosing the harmonic image before filtering shows the magnitude."""
     st = window.segment_tab
-    st.background.setCurrentIndex(1)
+    st.background.setCurrentIndex(st.background.findData("harmonic"))
     st.refresh()
-    assert st.titles[0].text() == "magnitude"
+    assert st.title.text() == "magnitude"
 
 
 def test_project_round_trip_keeps_wall_labels(window, tmp_path):
@@ -362,15 +362,17 @@ def test_changing_a_solver_setting_clears_the_result(solved, control, value):
 
 def test_changing_the_jump_rule_clears_the_result(solved):
     mt = solved.motion_tab
-    mt.jump_rule.setCurrentIndex(mt.jump_rule.findData("nearest"))
+    mt.jump_rule.setCurrentIndex(mt.jump_rule.findData("published"))
     assert not solved.session.has(Stage.MOTION)
     assert "re-run" in mt.banner.text()
 
 
 def test_the_jump_search_box_follows_the_rule(window):
-    """The search budget belongs to the published rule only."""
+    """The search budget belongs to the published rule only, so it starts off."""
     mt = window.motion_tab
-    assert mt.jump_rule.currentData() == "published"
+    assert mt.jump_rule.currentData() == "nearest"
+    assert not mt.njumps.isEnabled()
+    mt.jump_rule.setCurrentIndex(mt.jump_rule.findData("published"))
     assert mt.njumps.isEnabled()
     mt.jump_rule.setCurrentIndex(mt.jump_rule.findData("nearest"))
     assert not mt.njumps.isEnabled()
@@ -423,8 +425,11 @@ def test_turning_the_fit_off_changes_what_is_used(window, dataset):
     assert np.nanmax(np.abs(on.best - off.best)) > 1e-3
 
 
-def test_jump_search_reports_whether_the_budget_binds(solved):
+def test_jump_search_reports_whether_the_budget_binds(solved, dataset):
     mt = solved.motion_tab
+    # the readout describes the published rule's search, so solve with that rule
+    mt.jump_rule.setCurrentIndex(mt.jump_rule.findData("published"))
+    mt._done(_solve(solved, dataset))
     mt.refresh()
     text = mt.jump_lbl.text()
     assert "search used" in text
@@ -592,3 +597,50 @@ def test_filtering_uses_the_moved_centre(window):
     ft.run()
     after = np.abs(window.session.result(Stage.FILTER)["image"][:, :, 0, 5]).sum()
     assert not np.isclose(before, after), "the moved centre was ignored"
+
+
+# ------------------------------------------------- one segmentation canvas
+
+def test_segmentation_shows_a_single_canvas(window):
+    """Contours are placed by hand, so the panel gets the whole width."""
+    st = window.segment_tab
+    assert len(st.canvases) == 1
+    assert st.canvases[0] is st.canvas
+
+
+def test_the_single_canvas_is_the_editable_one(window):
+    assert window.segment_tab.canvas.editable
+
+
+def test_every_image_choice_can_be_drawn_on(window):
+    """The selector replaces the read-only panels, so it must cover them."""
+    st = window.segment_tab
+    window.filter_tab.run()
+    seen = set()
+    for i in range(st.background.count()):
+        st.background.setCurrentIndex(i)
+        st.refresh()
+        seen.add(st.title.text())
+    # the two harmonic phases that used to have panels of their own
+    assert any("phase 1" in t for t in seen)
+    assert any("phase 2" in t for t in seen)
+    assert len(seen) == st.background.count()
+
+
+def test_the_second_raw_encoding_needs_no_filter(window):
+    """It comes straight from the dataset, unlike the harmonic choices."""
+    st = window.segment_tab
+    st.background.setCurrentIndex(st.background.findData("magnitude2"))
+    st.refresh()
+    assert "encoding 2" in st.title.text()
+
+
+def test_drawing_still_works_on_the_single_canvas(window):
+    st = window.segment_tab
+    c = st.canvas
+    c.key = (0, 0)
+    tri = np.array([[10.0, 10.0], [20.0, 10.0], [15.0, 20.0]])
+    window.undo_stack.push(AddContourCommand(c, tri, "lv_epi"))
+    assert len(window.session.contours[(0, 0)]) == 1
+    window.undo_stack.undo()
+    assert not window.session.contours.get((0, 0))

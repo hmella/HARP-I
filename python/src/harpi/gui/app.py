@@ -125,10 +125,15 @@ class MainWindow(QMainWindow):
         m.addAction(quit_action)
 
         e = self.menuBar().addMenu("&Edit")
-        undo = self.undo_stack.createUndoAction(self, "&Undo")
+        # Not createUndoAction: a contour being drawn is not on the stack yet,
+        # so undo has to take its nodes off one at a time before falling
+        # through to the committed history.
+        undo = QAction("&Undo", self)
         undo.setShortcut(QKeySequence.Undo)
-        redo = self.undo_stack.createRedoAction(self, "&Redo")
+        undo.triggered.connect(self._undo)
+        redo = QAction("&Redo", self)
         redo.setShortcut(QKeySequence.Redo)
+        redo.triggered.connect(self._redo)
         e.addAction(undo)
         e.addAction(redo)
 
@@ -136,6 +141,9 @@ class MainWindow(QMainWindow):
         for text, slot, key in (
             ("Next frame", lambda: self.nav.step_frame(1), "]"),
             ("Previous frame", lambda: self.nav.step_frame(-1), "["),
+            ("First frame", lambda: self.nav.frame.setValue(0), "Home"),
+            ("Last frame",
+             lambda: self.nav.frame.setValue(self.nav.n_frames - 1), "End"),
             ("Next slice", lambda: self.nav.step_slice(1), "."),
             ("Previous slice", lambda: self.nav.step_slice(-1), ","),
             ("Play / pause", lambda: self.nav.play.toggle(), "Space"),
@@ -155,6 +163,7 @@ class MainWindow(QMainWindow):
     def _show_help(self):
         QMessageBox.information(self, "Shortcuts", (
             "[ ]      previous / next frame\n"
+            "Home End first / last frame\n"
             ", .      previous / next slice\n"
             "Space    play / pause\n"
             "M        toggle mask overlay\n"
@@ -166,7 +175,11 @@ class MainWindow(QMainWindow):
             "  Enter        close the contour\n"
             "  Esc          cancel drawing\n"
             "  right-click  delete a point\n"
-            "  wheel        zoom      middle-drag  pan"
+            "  drag         move a point\n"
+            "  Ctrl+Z       while drawing, take off the last point;\n"
+            "               otherwise undo the last change\n"
+            "  wheel        zoom      middle-drag  pan\n"
+            "The point or contour under the cursor is highlighted."
         ))
 
     # ----------------------------------------------------------- navigation
@@ -175,8 +188,19 @@ class MainWindow(QMainWindow):
         self.session.current_frame = fr
         self._refresh_current()
 
+    def _undo(self):
+        """A node of the contour being drawn, else the last committed change."""
+        if self.segment_tab.canvas.undo_last_point():
+            return
+        self.undo_stack.undo()
+
+    def _redo(self):
+        if self.segment_tab.canvas.redo_last_point():
+            return
+        self.undo_stack.redo()
+
     def _toggle_play(self, on):
-        self.nav.play.setText("⏸" if on else "▶")
+        self.nav.play.setText("Pause" if on else "Play")
         self._timer.start() if on else self._timer.stop()
 
     def _toggle_mask(self):

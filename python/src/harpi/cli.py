@@ -20,7 +20,8 @@ def _cmd_process(args):
     Ih = flt(ds.image)
 
     a = args.a if args.a is not None else ds.suggested_a
-    print(f"motion: kernel={args.kernel} a={a:.3f} eta={args.eta}")
+    print(f"motion: kernel={args.kernel} a={a:.3f} eta={args.eta} "
+          f"jump rule={args.phase_jump_rule}")
 
     def progress(i, n, stage):
         if args.verbose:
@@ -146,8 +147,8 @@ def main(argv=None) -> int:
     pr.add_argument("--smooth-reference", action="store_true")
     pr.add_argument("--temporal-fit", action="store_true")
     pr.add_argument("--temporal-order", type=int, default=10)
-    pr.add_argument("--phase-jump-rule", default="published",
-                    choices=["published", "nearest"],
+    pr.add_argument("--phase-jump-rule", default="nearest",
+                    choices=["nearest", "published"],
                     help="rule for the 2*pi offset of each frame")
     pr.add_argument("-v", "--verbose", action="store_true")
     pr.set_defaults(func=_cmd_process)

@@ -91,21 +91,25 @@ class SegmentTab(QWidget):
         self.session = session
         self.undo_stack = undo_stack
 
-        self.canvases = []
-        self.titles = []
-        grid = QHBoxLayout()
-        for title in ("magnitude", "phase 1", "phase 2"):
-            c = ImageCanvas(session, title)
-            c.undo_stack = undo_stack
-            c.contoursChanged.connect(self._contours_changed)
-            self.canvases.append(c)
-            col = QVBoxLayout()
-            lbl = QLabel(title); lbl.setAlignment(Qt.AlignCenter)
-            self.titles.append(lbl)
-            col.addWidget(lbl); col.addWidget(c)
-            w = QWidget(); w.setLayout(col)
-            grid.addWidget(w, 1)
-        self.canvases[0].editable = True
+        # One canvas, as large as the tab allows. Contours are drawn by hand and
+        # a third of the width is not enough to place a point accurately. The
+        # read-only phase panels that used to sit beside it showed nothing the
+        # image selector below cannot show here.
+        self.canvas = ImageCanvas(session, "magnitude")
+        self.canvas.undo_stack = undo_stack
+        self.canvas.contoursChanged.connect(self._contours_changed)
+        self.canvas.editable = True
+        self.title = QLabel("magnitude")
+        self.title.setAlignment(Qt.AlignCenter)
+
+        # app.py walks this on every tab, and the rest of this class reads
+        # canvas directly.
+        self.canvases = [self.canvas]
+        self.titles = [self.title]
+
+        grid = QVBoxLayout()
+        grid.addWidget(self.title)
+        grid.addWidget(self.canvas, 1)
 
         # Which wall the next contour outlines.
         self.wall = QComboBox()
@@ -113,11 +117,11 @@ class SegmentTab(QWidget):
             self.wall.addItem(label, key)
         self.wall.setCurrentIndex(0)
 
-        # What the editable panel shows. Drawing on the harmonic magnitude
-        # is often easier than on the raw image, since the tag pattern is
-        # suppressed and the wall stands out.
+        # Which image to draw on. The harmonic magnitude is often easiest,
+        # since the tag pattern is suppressed and the wall stands out.
         self.background = QComboBox()
         self.background.addItem("Magnitude (raw)", "magnitude")
+        self.background.addItem("Magnitude (raw, encoding 2)", "magnitude2")
         self.background.addItem("Harmonic magnitude (filtered)", "harmonic")
         self.background.addItem("Harmonic phase 1", "phase1")
         self.background.addItem("Harmonic phase 2", "phase2")
@@ -198,7 +202,7 @@ class SegmentTab(QWidget):
 
     # -------------------------------------------------------------- actions
     def _toggle_draw(self, checked):
-        c = self.canvases[0]
+        c = self.canvas
         if checked:
             c.start_contour(self.wall.currentData())
             self.banner.setText("Click to place points. Enter to close, Esc to cancel.")
@@ -208,25 +212,25 @@ class SegmentTab(QWidget):
     def finish_drawing(self):
         if self.draw_btn.isChecked():
             self.draw_btn.setChecked(False)
-            self.canvases[0].finish_contour()
+            self.canvas.finish_contour()
 
     def cancel_drawing(self):
         if self.draw_btn.isChecked():
             self.draw_btn.setChecked(False)
-            self.canvases[0].cancel_contour()
+            self.canvas.cancel_contour()
 
     def _delete_contour(self):
         ci = self.contour_list.currentRow()
         if ci < 0:
             return
-        self.undo_stack.push(DeleteContourCommand(self.canvases[0], ci))
+        self.undo_stack.push(DeleteContourCommand(self.canvas, ci))
 
     def _clear_frame(self):
-        key = self.canvases[0].key
+        key = self.canvas.key
         if not self.session.contours.get(key):
             return
         self.undo_stack.push(
-            SetContoursCommand(self.canvases[0], {key: []}, "clear frame")
+            SetContoursCommand(self.canvas, {key: []}, "clear frame")
         )
 
     def _adopt_mask(self, mask, origin):
@@ -313,7 +317,7 @@ class SegmentTab(QWidget):
             QMessageBox.information(self, "Propagate",
                                     "Nothing to do (tick 'overwrite existing'?).")
             return
-        self.undo_stack.push(SetContoursCommand(self.canvases[0], changes, labels))
+        self.undo_stack.push(SetContoursCommand(self.canvas, changes, labels))
 
     # ------------------------------------------------------------- refresh
     def _contours_changed(self):
@@ -382,9 +386,9 @@ class SegmentTab(QWidget):
         self.session.stageChanged.emit(int(Stage.SEGMENT))
 
     def _update_list(self):
-        key = self.canvases[0].key
+        key = self.canvas.key
         self.contour_list.clear()
-        labels = self.canvases[0].labels_for(key)
+        labels = self.canvas.labels_for(key)
         for i, p in enumerate(self.session.contours.get(key, [])):
             lb = labels[i] if i < len(labels) else "other"
             self.contour_list.addItem(f"{wall_label(lb)}, {len(p)} points")
@@ -406,29 +410,26 @@ class SegmentTab(QWidget):
 
         # What the editable panel shows.
         choice = self.background.currentData()
-        if choice != "magnitude" and filt is None:
+        if choice not in ("magnitude", "magnitude2") and filt is None:
             choice = "magnitude"
             if self.background.currentIndex() != 0:
                 self.banner.setText("Run the filter first to draw on the harmonic image.")
         if choice == "magnitude":
-            self.canvases[0].set_image(mag, *nan_range(mag))
-            self.titles[0].setText("magnitude")
+            self.canvas.set_image(mag, *nan_range(mag))
+            self.title.setText("magnitude")
+        elif choice == "magnitude2":
+            second = np.real(ds.image[:, :, min(1, ds.image.shape[2] - 1), fr])
+            self.canvas.set_image(second, *nan_range(second))
+            self.title.setText("magnitude, encoding 2")
         elif choice == "harmonic":
             h = np.abs(filt["image"][:, :, 0, fr])
-            self.canvases[0].set_image(h, *nan_range(h))
-            self.titles[0].setText("harmonic magnitude")
+            self.canvas.set_image(h, *nan_range(h))
+            self.title.setText("harmonic magnitude")
         else:
             d = 0 if choice == "phase1" else 1
             pha = np.angle(filt["image"][:, :, d, fr])
-            self.canvases[0].set_image(pha, -np.pi, np.pi, cmap="twilight")
-            self.titles[0].setText(f"harmonic phase {d + 1}")
-
-        for i in (1, 2):
-            if filt is None:
-                self.canvases[i].set_image(np.zeros_like(mag), 0, 1)
-            else:
-                pha = np.angle(filt["image"][:, :, i - 1, fr])
-                self.canvases[i].set_image(pha, -np.pi, np.pi, cmap="twilight")
+            self.canvas.set_image(pha, -np.pi, np.pi, cmap="twilight")
+            self.title.setText(f"harmonic phase {d + 1}")
 
         m = self.session.mask
         overlay = m[:, :, fr] if m is not None else None

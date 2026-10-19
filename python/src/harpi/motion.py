@@ -29,7 +29,7 @@ from .types import MotionResult
 from .unwrap import phase_quality_2d, unwrap2, unwrap3
 
 # Rules for the per-frame 2*pi offsets; the first is the default.
-PHASE_JUMP_RULES = ("published", "nearest")
+PHASE_JUMP_RULES = ("nearest", "published")
 
 __all__ = ["estimate_motion_2d", "estimate_motion_3d", "shape_schedule",
            "flip_components"]
@@ -153,7 +153,7 @@ def estimate_motion_2d(
     reference=0,
     njumps=8,
     progress=None,
-    phase_jump_rule="published",
+    phase_jump_rule="nearest",
 ):
     """Estimate 2-D Lagrangian displacement from a filtered harmonic image.
 
@@ -173,12 +173,13 @@ def estimate_motion_2d(
     progress
         Optional ``callable(frame_index, n_frames, stage)``.
     phase_jump_rule
-        ``"published"`` (the default, as in the MATLAB toolbox) chooses the
-        2*pi offset of each frame with
+        ``"nearest"``, the default, chooses the 2*pi offset of each frame with
+        :func:`~harpi.consistency.nearest_coordinate_consistency` and ignores
+        ``njumps``. ``"published"`` reproduces the MATLAB toolbox with
         :func:`~harpi.consistency.temporal_phase_consistency`, searching
-        ``njumps`` steps around its estimate. ``"nearest"`` uses
-        :func:`~harpi.consistency.nearest_coordinate_consistency`, which
-        ignores ``njumps``.
+        ``njumps`` steps around its estimate; on ``data_2D.mat`` it puts six of
+        eighteen frames one tag period out, so it is kept for reproducing the
+        paper rather than recommended.
 
     Returns
     -------
@@ -333,7 +334,7 @@ def estimate_motion_3d(
     njumps=2,
     chunks=4,
     progress=None,
-    phase_jump_rule="published",
+    phase_jump_rule="nearest",
 ):
     """Estimate 3-D Lagrangian displacement. See :func:`estimate_motion_2d`.
 
@@ -341,14 +342,13 @@ def estimate_motion_3d(
     the dense evaluation matrix is never held whole. The factorisation is
     reused across slabs.
 
-    Only the published rule for the phase jumps is available in 3-D.
+    Both phase jump rules are available, as in 2-D. The nearest-coordinate
+    rule is dimension generic, so nothing here is specific to three axes.
     """
     if phase_jump_rule not in PHASE_JUMP_RULES:
         raise ValueError(f"phase_jump_rule must be one of {PHASE_JUMP_RULES}, "
                          f"not {phase_jump_rule!r}")
-    if phase_jump_rule != "published":
-        raise ValueError("the nearest-coordinate rule for the phase jumps is "
-                         "available in 2-D only")
+
     Ih = np.asarray(harmonic_image)
     if Ih.ndim != 5 or Ih.shape[3] != 3:
         raise ValueError("harmonic_image must be (rows, cols, slices, 3, frames)")
@@ -396,9 +396,15 @@ def estimate_motion_3d(
 
     if progress:
         progress(0, nfr, "consistency")
-    jumps, jump_info = temporal_phase_consistency(
-        dpha, reference=reference, njumps=njumps, downsample=2, return_info=True,
-    )
+    if phase_jump_rule == "nearest":
+        jumps, jump_info = nearest_coordinate_consistency(
+            dpha, reference=reference, downsample=2, return_info=True,
+        )
+    else:
+        jumps, jump_info = temporal_phase_consistency(
+            dpha, reference=reference, njumps=njumps, downsample=2,
+            return_info=True,
+        )
     for d in range(3):
         dpha[d] = dpha[d] + jumps[d][None, None, None, :]
 
