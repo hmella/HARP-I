@@ -62,6 +62,64 @@ def _cmd_info(args):
     return 0
 
 
+def _cmd_dicom(args):
+    """List what a DICOM path holds, or load one series out of it."""
+    import numpy as np
+
+    import harpi
+    from harpi.io.dicomio import read_dicom_series, scan_dicom
+
+    catalogue = scan_dicom(args.input, detect=not args.no_detect)
+
+    if args.series is None:
+        tagged = sum(s.looks_tagged for s in catalogue)
+        print(f"{len(catalogue)} series under {args.input}, "
+              f"{tagged} of them look tagged\n")
+        print(f"{'#':>3} {'tagged':>6} {'frames':>6} {'size':>9} "
+              f"{'spacing':>9} {'angles':>14}  description")
+        for i, sinfo in enumerate(catalogue):
+            if sinfo.tag is None:
+                sp, ang = "-", "-"
+            else:
+                sp = f"{sinfo.tag.spacing_mm(sinfo.pixel_spacing):.2f} mm"
+                a = np.degrees(sinfo.tag.angles) % 180
+                ang = f"{a[0]:.0f}, {a[1]:.0f} deg"
+            slice_note = ("" if sinfo.slice_location is None
+                          else f"  slice {sinfo.slice_location:+.1f}")
+            print(f"{i:>3} {'yes' if sinfo.looks_tagged else '':>6} "
+                  f"{sinfo.n_frames:>6} {sinfo.shape[0]:>4}x{sinfo.shape[1]:<4} "
+                  f"{sp:>9} {ang:>14}  "
+                  f"{sinfo.description or sinfo.protocol}{slice_note}")
+        print("\nPass --series with a number from the first column, or a UID.")
+        return 0
+
+    uid = args.series
+    if uid.isdigit():
+        idx = int(uid)
+        if not 0 <= idx < len(catalogue):
+            print(f"no series {idx}; there are {len(catalogue)}", file=sys.stderr)
+            return 2
+        uid = catalogue[idx].uid
+
+    ds = read_dicom_series(args.input, series_uid=uid, tag_spacing=args.tag_spacing,
+                           catalogue=catalogue)
+    print(f"image           {ds.image.shape}")
+    print(f"pixel size      {ds.pixel_size}")
+    print(f"tag spacing     {ds.tag_spacing:.4f}  ({ds.meta['tag_spacing_source']})")
+    print(f"px/wavelength   {ds.pixels_per_wavelength:.3f}")
+    print(f"suggested a     {ds.suggested_a:.3f}")
+    print(f"tagging         {ds.meta['tagging']}")
+    if "tag_angles" in ds.meta:
+        import numpy as np
+
+        print(f"tag angles      {(np.degrees(ds.meta['tag_angles']) % 180).round(1)}")
+    print(f"frame times     {'none' if ds.times is None else ds.times[:4].round(1)}")
+    if args.out:
+        harpi.save_mat(args.out, dataset=ds)
+        print(f"wrote {args.out}")
+    return 0
+
+
 def _cmd_gui(args):
     try:
         from .gui.app import main as gui_main
@@ -97,6 +155,16 @@ def main(argv=None) -> int:
     pi = sub.add_parser("info", help="summarise a dataset")
     pi.add_argument("input", type=Path)
     pi.set_defaults(func=_cmd_info)
+
+    pd = sub.add_parser("dicom", help="list or load a DICOM path")
+    pd.add_argument("input", help="a folder, scanned recursively, or one file")
+    pd.add_argument("--series", help="index from the listing, or a SeriesInstanceUID")
+    pd.add_argument("--tag-spacing", type=float, default=None,
+                    help="override the measured tag spacing")
+    pd.add_argument("--no-detect", action="store_true",
+                    help="skip the tag measurement, which reads one frame per series")
+    pd.add_argument("--out", help="write the chosen series to a .mat file")
+    pd.set_defaults(func=_cmd_dicom)
 
     pg = sub.add_parser("gui", help="launch the graphical interface")
     pg.add_argument("project", nargs="?", default=None)

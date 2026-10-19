@@ -6,3 +6,6 @@ python/**/__pycache__/
 python/.pytest_cache/
 python/**/*.egg-info/
 python/tests/data/*.mat
+
+# DICOM examples: large, and patient imaging
+data/Tagging dataset/

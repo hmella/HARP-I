@@ -44,6 +44,10 @@ class DataTab(QWidget):
 
         self.open_mat = QPushButton("Open .mat…")
         self.open_dicom = QPushButton("Open DICOM folder…")
+        self.open_dicom_file = QPushButton("Open DICOM file…")
+        self.open_dicom_file.setToolTip(
+            "A single file, which may hold every frame of a cine.")
+        self.open_dicom_file.clicked.connect(self._open_dicom_file)
         self.open_mat.clicked.connect(self._open_mat)
         self.open_dicom.clicked.connect(self._open_dicom)
 
@@ -108,6 +112,7 @@ class DataTab(QWidget):
         buttons = QHBoxLayout()
         buttons.addWidget(self.open_mat)
         buttons.addWidget(self.open_dicom)
+        buttons.addWidget(self.open_dicom_file)
         buttons.addStretch(1)
 
         side = QVBoxLayout()
@@ -139,17 +144,43 @@ class DataTab(QWidget):
         self._adopt(ds, path)
 
     def _open_dicom(self):
-        path = QFileDialog.getExistingDirectory(self, "Open DICOM series")
-        if not path:
-            return
-        from ..io.dicomio import read_dicom_series
+        path = QFileDialog.getExistingDirectory(self, "Open DICOM folder")
+        if path:
+            self._load_dicom(path)
+
+    def _open_dicom_file(self):
+        """A single file, which may hold a whole cine as multiple frames."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open DICOM file", "", "DICOM (*.dcm *.ima *.IMA);;Any file (*)")
+        if path:
+            self._load_dicom(path)
+
+    def _load_dicom(self, path):
+        from ..io.dicomio import read_dicom_series, scan_dicom
+
+        from .dicom_picker import choose_series
 
         try:
-            ds = read_dicom_series(path)
+            catalogue = scan_dicom(path)
         except Exception as exc:
-            self.banner.setText(f"Could not read {path}:\n{exc}")
+            self.banner.setText(f"Could not scan {path}:\n{exc}")
             return
-        self._adopt(ds, path)
+        chosen = choose_series(catalogue, self)
+        if chosen is None:
+            self.banner.setText("No series chosen.")
+            return
+        try:
+            ds = read_dicom_series(path, series_uid=chosen.uid, catalogue=catalogue)
+        except Exception as exc:
+            self.banner.setText(f"Could not read {chosen.description or path}:\n{exc}")
+            return
+        if self._adopt(ds, path):
+            where = ds.meta.get("tag_spacing_source", "unknown")
+            name = chosen.description or chosen.protocol or chosen.uid[-12:]
+            self.banner.setText(
+                f"Loaded {name}: {ds.n_frames} frames, tag spacing "
+                f"{ds.tag_spacing:.2f} ({where})."
+            )
 
     def _adopt(self, ds, path):
         # One place to refuse 3-D. Everything downstream assumes a 2-D series:
@@ -441,30 +472,60 @@ class FilterTab(QWidget):
         if ds is None or ds.image.ndim != 4:
             return
         shape = ds.image.shape[:2]
+        measured = self._measured_centres()
+        angles = ((ds.meta or {}).get("tag_angles")
+                  if measured is not None else None)
         for i in range(2):
+            ang = (float(np.asarray(angles)[i]) if angles is not None
+                   else (0.0 if i == 0 else np.pi / 2))
             omega = ds.ke[min(i, len(ds.ke) - 1)] * np.array(
-                [np.cos(0.0 if i == 0 else np.pi / 2),
-                 np.sin(0.0 if i == 0 else np.pi / 2)]
-            )
+                [np.cos(ang), np.sin(ang)])
+            # harmonic_center takes (col, row); the measurement is (row, col)
+            centre = (None if measured is None
+                      else np.round(measured[i][::-1]).astype(int))
             self.centres[i] = harmonic_center(itok(ds.image[:, :, i, 0]), omega,
-                                              (2, 2), shape)
+                                              (2, 2), shape, centre)
         self._set_centre_boxes(self.centres[self._current_encoding()])
         self.session.invalidate_from(Stage.FILTER)
         self.banner.setText(f"Peaks at {self.centres.round(1).tolist()} (row, col).")
         self._draw_markers()
 
+    def _measured_centres(self):
+        """Harmonic peaks measured when the series was read, if any.
+
+        A DICOM export rarely records the tag spacing and the tags are not
+        always along the image axes, so the loader measures both. Seeding from
+        that beats the nominal 0 and 90 degrees, which is wrong for a tag grid
+        prescribed at 45.
+        """
+        ds = self.session.dataset
+        if ds is None:
+            return None
+        c = (ds.meta or {}).get("tag_centres")
+        if c is None:
+            return None
+        c = np.asarray(c, dtype=float)
+        return c if c.shape == (2, 2) else None
+
     def reset_centres(self):
-        """Put the centres back on the nominal tag frequency and directions."""
+        """Put the centres back where the data say they are."""
         ds = self.session.dataset
         if ds is None:
             return
         shape = ds.image.shape[:2]
-        for i, ang in enumerate((0.0, np.pi / 2)):
-            omega = ds.ke[min(i, len(ds.ke) - 1)] * np.array([np.cos(ang), np.sin(ang)])
-            self.centres[i] = frequency_to_centre(omega, shape)
+        measured = self._measured_centres()
+        if measured is not None:
+            self.centres = measured.copy()
+            note = "Centres reset to the peaks measured from the images."
+        else:
+            for i, ang in enumerate((0.0, np.pi / 2)):
+                omega = ds.ke[min(i, len(ds.ke) - 1)] * np.array(
+                    [np.cos(ang), np.sin(ang)])
+                self.centres[i] = frequency_to_centre(omega, shape)
+            note = "Centres reset to the nominal tag frequency."
         self._set_centre_boxes(self.centres[self._current_encoding()])
         self.session.invalidate_from(Stage.FILTER)
-        self.banner.setText("Centres reset to the nominal tag frequency.")
+        self.banner.setText(note)
         self._draw_markers()
 
     def _draw_markers(self):
