@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy was not distributed with this file, You can
+# obtain one at https://mozilla.org/MPL/2.0/.
+
 """HARP-I motion estimation.
 
 The method (Mella et al., IEEE TMI 40(4):1240-1252, 2021):

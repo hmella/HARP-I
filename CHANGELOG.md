@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Python package 0.1.0
+
+A Python implementation of the whole pipeline, in `python/`, reproducing the
+MATLAB toolbox to about 1e-9 at every stage.
+
+- `harpi` as a library: filtering, unwrapping, motion estimation, pixel and
+  segment strain, regional analysis, and readers for MATLAB files and tagged
+  DICOM.
+- `harpi` as a command line tool: `info`, `process`, `dicom` and `gui`.
+- A PySide6 interface covering the pipeline from reading the data to regional
+  strain, with seven tabs, undo, snapshots and a comparison view.
+- Contours drawn on one frame can be tracked through the cycle on the
+  harmonic phase rather than copied.
+- The harmonic bandpass is previewed live on k-space, so a passband is chosen
+  by eye before it is applied.
+- AHA segments are oriented by both right ventricular insertion points.
+- Two deliberate departures from the MATLAB toolbox, both documented in
+  `python/README.md`: temporal fitting solves a null space least squares
+  rather than the normal equations, and the nearest coordinate rule is the
+  default for phase jumps. The published rule remains available.
+
 ### Fixed
 
 - **Search path collision with DENSEanalysis.** DENSEanalysis ships an

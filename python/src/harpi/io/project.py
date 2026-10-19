@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy was not distributed with this file, You can
+# obtain one at https://mozilla.org/MPL/2.0/.
+
 """Project files.
 
 A ``.harpi`` file is a zip holding ``meta.json`` and ``arrays/*.npy``. Image

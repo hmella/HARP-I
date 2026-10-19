@@ -4,9 +4,9 @@ A Python implementation of **HARP-I**, which recovers cardiac motion and
 strain from tagged MR images by interpolating unwrapped harmonic phase with
 radial basis functions.
 
-> H. Mella, J. Mura, H. Sanchez, S. Uribe, C. Bertoglio, J. Sotelo,
-> "HARP-I: A Harmonic Phase Interpolation Method for the Estimation of Motion
-> From Tagged MR Images", *IEEE TMI* 40(4):1240-1252, 2021.
+> H. Mella, J. Mura, H. Wang, M. D. Taylor, R. Chabiniok, J. Tintera,
+> J. Sotelo, S. Uribe, "HARP-I: A Harmonic Phase Interpolation Method for the
+> Estimation of Motion From Tagged MR Images", *IEEE TMI* 40(4):1240-1252, 2021.
 > [doi:10.1109/TMI.2021.3051092](https://doi.org/10.1109/TMI.2021.3051092)
 
 It accompanies the MATLAB toolbox in the parent directory and needs neither

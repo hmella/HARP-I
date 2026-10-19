@@ -6,7 +6,61 @@ HARP-I (Harmonic Phase Interpolation) is a method that utilizes radial basis fun
   <img src="examples/slices_animation.gif" height="250" alt="Estimated motion and circumferential strain map">
 </p>
 
+HARP-I comes in two implementations, either of which can be used on its own:
+
+| | |
+|---|---|
+| :m: **MATLAB toolbox**, in `src/` | the original, and the reference the Python port is checked against |
+| :snake: **Python package**, in `python/` | the same pipeline as a library and a command line tool, with a graphical interface over the whole of it |
+
+The two agree to about 1e-9 at every stage. Pick whichever suits you.
+
+---
+
+# :snake: Python
+
+```sh
+git clone git@github.com:hmella/HARP-I.git
+cd HARP-I
+pip install -e 'python[gui]'     # or just python, for the library alone
+```
+
+Then, from a script:
+
+```python
+import harpi
+
+ds = harpi.load_mat_2d("data/data_2D.mat")
+flt = harpi.HarpFilter2D(ds.image, ds.ke, (0.0, 3.14159 / 2))
+res = harpi.estimate_motion_2d(flt(ds.image), ds.mask, a=ds.suggested_a)
+```
+
+from the shell:
+
+```sh
+harpi info data/data_2D.mat
+harpi process data/data_2D.mat -o out.mat
+```
+
+or open the interface, which covers reading the data through to regional
+strain:
+
+```sh
+harpi gui
+```
+
+:book: **[python/README.md](python/README.md)** documents the library, the
+command line and every tab of the interface.
+
+The package needs Python 3.10 or newer. PySide6 is only required for the
+interface, and `import harpi` does not pull it in.
+
+---
+
+# :m: MATLAB
+
 ## Installing unwrapping functionalities
+
 HARP-I relies on the unwrapping algorithm implemented in the **DENSEanalysis** toolbox. However, any unwrapping procedure can be used. The unwrapping algorithm is available in the [DENSEanalysis repository](https://github.com/denseanalysis/denseanalysis/tree/main).
 
 To install **DENSEanalysis** and access its unwrapping functionalities, follow these steps:
@@ -24,7 +78,7 @@ To install **DENSEanalysis** and access its unwrapping functionalities, follow t
    DENSEsetup
    ```
 
-## HARP-I installation
+## Toolbox installation
 To install **HARP-I**, follow these steps:
 
 1. Clone the repository:
@@ -65,10 +119,16 @@ HARP-I includes demo scripts showcasing its application to **2D and 3D tagged MR
 
 :file_folder: Inside this folder, you will also find a `README` file that provides additional explanations about the demo scripts and their usage.  
 
-### Data Availability
-Anonymized **2D and 3D tagged MR images** can be found in the `data/` directory.  
+---
 
-📢 **Note:** Due to size constraints, the data is hosted on an external cloud storage service. Please refer to the `README` within the `data/` folder for the download link.
+# :floppy_disk: Data
+
+`data/data_2D.mat` is in the repository, so the 2D demos and the Python test
+suite work from a fresh clone with nothing else to fetch.
+
+`data/data_3D.mat` is 1.3 GB and is **not** in the repository. The `README`
+inside `data/` has the download link. Nothing breaks without it: the 3D demos
+need it, and the handful of tests that use it skip with a message saying so.
 
 ## Citing
 

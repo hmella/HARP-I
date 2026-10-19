@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy was not distributed with this file, You can
+# obtain one at https://mozilla.org/MPL/2.0/.
+
 """Temporal polynomial fitting of the estimated motion.
 
 A 10th order polynomial is fitted per component to smooth the tissue

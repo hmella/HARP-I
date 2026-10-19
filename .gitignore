@@ -9,3 +9,9 @@ python/tests/data/*.mat
 
 # DICOM examples: large, and patient imaging
 data/Tagging dataset/
+
+# GUI session files, which record the path the data was read from
+*.harpi
+
+# the published article, which the journal holds the copyright to
+HARP-I_A_Harmonic_Phase_Interpolation_Method_*.pdf

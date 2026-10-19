@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy was not distributed with this file, You can
+# obtain one at https://mozilla.org/MPL/2.0/.
+
 """Reading tagged MR series from DICOM.
 
 Clinical exports arrive in whatever shape the scanner produced. A folder may

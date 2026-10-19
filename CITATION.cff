@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: If you use HARP-I in your research, please cite the article below.
+title: "HARP-I: Harmonic Phase Interpolation"
+abstract: >-
+  Harmonic phase interpolation for estimating tissue motion and strain from
+  2D and 3D tagged magnetic resonance images, as a MATLAB toolbox and as a
+  Python package with a graphical interface.
+authors:
+  - family-names: Mella
+    given-names: Hernán
+    email: hernan.mella@pucv.cl
+    affiliation: Pontificia Universidad Católica de Valparaíso
+repository-code: https://github.com/hmella/HARP-I
+license: MPL-2.0
+type: software
+preferred-citation:
+  type: article
+  title: >-
+    HARP-I: A Harmonic Phase Interpolation Method for the Estimation of
+    Motion From Tagged MR Images
+  authors:
+    - family-names: Mella
+      given-names: Hernán
+    - family-names: Mura
+      given-names: Joaquín
+    - family-names: Wang
+      given-names: Hui
+    - family-names: Taylor
+      given-names: Michael D.
+    - family-names: Chabiniok
+      given-names: Radomir
+    - family-names: Tintera
+      given-names: Jaroslav
+    - family-names: Sotelo
+      given-names: Julio
+    - family-names: Uribe
+      given-names: Sergio
+  journal: IEEE Transactions on Medical Imaging
+  volume: 40
+  issue: 4
+  start: 1240
+  end: 1252
+  year: 2021
+  doi: 10.1109/TMI.2021.3051092

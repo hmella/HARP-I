@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy was not distributed with this file, You can
+# obtain one at https://mozilla.org/MPL/2.0/.
+
 """Locating the first harmonic peak in k-space."""
 
 from __future__ import annotations

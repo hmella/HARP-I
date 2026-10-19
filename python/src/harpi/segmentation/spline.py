@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy was not distributed with this file, You can
+# obtain one at https://mozilla.org/MPL/2.0/.
+
 """Contour resampling.
 
 Derived from clinesegments.m in DENSEanalysis (Copyright (c) 2016

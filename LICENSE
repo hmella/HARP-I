@@ -379,3 +379,21 @@ Third Party Software Sources
 ============================
 
 This Software uses code from other open source projects.
+
+DENSEanalysis
+-------------
+
+Copyright (c) 2016 DENSEanalysis Contributors
+Mozilla Public License, v. 2.0
+https://github.com/denseanalysis/denseanalysis
+
+The phase unwrapping and the contour resampling derive from DENSEanalysis,
+which is under the same licence. In the MATLAB toolbox this covers the
+unwrapping helpers; in the Python package it covers
+
+  src/harpi/unwrap/pathfollow.py   from unwrap2.m and unwrap3.m
+  src/harpi/unwrap/quality.py      from phasequality2_mask.m and phasequality3.m
+  src/harpi/segmentation/spline.py from clinesegments.m
+
+The unwrapping was written by Drew Gilliam. Each file names its origin in its
+own docstring.

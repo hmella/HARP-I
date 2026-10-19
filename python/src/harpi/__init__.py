@@ -1,11 +1,15 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy was not distributed with this file, You can
+# obtain one at https://mozilla.org/MPL/2.0/.
+
 """HARP-I: motion and strain from tagged MR images.
 
 A Python implementation of the harmonic phase interpolation method of
 
-    H. Mella, J. Mura, H. Sanchez, S. Uribe, C. Bertoglio, J. Sotelo,
-    "HARP-I: A Harmonic Phase Interpolation Method for the Estimation of
-    Motion From Tagged MR Images", IEEE Transactions on Medical Imaging
-    40(4):1240-1252, 2021. doi:10.1109/TMI.2021.3051092
+    H. Mella, J. Mura, H. Wang, M. D. Taylor, R. Chabiniok, J. Tintera,
+    J. Sotelo, S. Uribe, "HARP-I: A Harmonic Phase Interpolation Method for
+    the Estimation of Motion From Tagged MR Images", IEEE Transactions on
+    Medical Imaging 40(4):1240-1252, 2021. doi:10.1109/TMI.2021.3051092
 
 Typical use::
 

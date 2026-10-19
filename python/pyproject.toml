@@ -4,17 +4,26 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harpi"
-version = "0.1.0"
+dynamic = ["version"]
 description = "HARP-I: harmonic phase interpolation for motion and strain from tagged MR images"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MPL-2.0" }
+# a copy of the repository licence, so the built artifacts carry the notice
+license-files = { paths = ["LICENSE"] }
 authors = [{ name = "Hernan Mella", email = "hernan.mella@pucv.cl" }]
 keywords = ["mri", "tagging", "cardiac", "strain", "motion", "harp"]
 classifiers = [
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
     "numpy>=1.24",
@@ -23,6 +32,8 @@ dependencies = [
     "h5py>=3.8",
     "pydicom>=2.4",
     "matplotlib>=3.7",
+    # matplotlib pulls this in, but the filter outline imports it directly
+    "contourpy>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -37,15 +48,19 @@ harpi-gui = "harpi.gui.app:main"
 Homepage = "https://github.com/hmella/HARP-I"
 Paper = "https://doi.org/10.1109/TMI.2021.3051092"
 
+[tool.hatch.version]
+path = "src/harpi/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/harpi"]
 
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
 [tool.pytest.ini_options]
+# so that a plain "pytest" works in a clone, without installing first
+pythonpath = ["src"]
 testpaths = ["tests"]
-markers = [
-    "slow: end-to-end runs",
-    "matlab: needs the full MATLAB reference (not committed)",
-]
 
 [tool.ruff]
 line-length = 100

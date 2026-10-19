@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy was not distributed with this file, You can
+# obtain one at https://mozilla.org/MPL/2.0/.
+
 """Phase quality maps for quality-guided unwrapping.
 
 Derived from phasequality2_mask.m and phasequality3.m in DENSEanalysis
